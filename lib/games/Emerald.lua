@@ -1,0 +1,27 @@
+return {BPE={
+    name="Emerald",family="E",dataCode="BPEE",starters={"Treecko","Torchic","Mudkip"},roamers={"Latias","Latios"},
+    seed=0x03005D80,partyCount=0x020244E9,party=0x020244EC,enemy=0x02024744,speciesInfo=0x083203CC,
+    speciesNames=0x083185C8,moveNames=0x0831977C,battleMoves=0x0831C898,items=0x085839A0,
+    save1Ptr=0x03005D8C,save2Ptr=0x03005D90,storagePtr=0x03005D94,roamerOffset=0x31DC,emerald=true,
+    gMain=0x030022C0,cb2Overworld=0x08085E5C,cb2Battle=0x08038420,tasks=0x03005E00,starterTask=0x0813425C,
+    sweetScentTask=0x08159FEC,sweetScentEncounter=0x080B5578,createMon=0x08067B4C,starterCreateDest=0x03007D98,
+    startMenuCursor=0x0203760E,mapHeader=0x02037318,objectEvents=0x02037350,wildHeaders=0x08552D48,
+    playerAvatar=0x02037590,backupMapLayout=0x03005DC0,
+    actionSelectionCursor=0x020244AC,battlerControllerFuncs=0x03005D60,chooseAction=0x08057588,
+    paletteFade=0x02037FD4,bagState=0x0203CE58,bagPocketOffset=5,bagCursorOffset=8,bagScrollOffset=18,
+    bagOffset=0x560,itemsCount=30,keyItemsCount=30,ballsCount=16,bagKeyOffset=0xAC,
+    storage=0x02029808,bagMenuCallbacks={0x081AABB0,0x081AAD5C},initRoamer=0x08161CBC,specialVar8004=0x020375E0,
+    battleType=0x02022FEC,battleMons=0x02024084,battleOutcome=0x0202433A,
+    battleActionCursor=0x020244AC,battleMoveCursor=0x020244B0,moveToLearn=0x020244E2,
+    activeBattler=0x02024064,battlerPartyIndexes=0x0202406E,chooseMove=0x08057BFC,
+    fieldLocked=0x03000F2C,inBattleOffset=0x439,rngCounter=0x020249C0,endScriptedWild=0x080B0B6C,
+    replaceMoveTask=0x081C174C,evolutionTask=0x0813E570,partyStructSize=100,battleMonSize=88,speciesInfoSize=28,
+    pcItemsOffset=0x498,pcItemsCapacity=50,pcSplitStacks=true,maxItemId=376,
+    bagPockets={
+        [1]={name="Items",offset=0x560,capacity=30,stack=99,split=true},
+        [2]={name="Poke Balls",offset=0x650,capacity=16,stack=99,split=true},
+        [3]={name="TM/HM",offset=0x690,capacity=64,stack=99},
+        [4]={name="Berries",offset=0x790,capacity=46,stack=999},
+        [5]={name="Key Items",offset=0x5D8,capacity=30,stack=99,split=true,protected=true},
+    }
+}}
