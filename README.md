@@ -12,21 +12,14 @@ battling, Pickup farming, and shiny encounter hunting.
 ## Usage
 
 1. Keep the launcher files and the `lib` directory together.
-2. Open the matching ROM in mGBA.
-3. Open **Tools > Scripting**.
-4. Load the matching launcher: `Emerald.lua`, `Ruby.lua`, `Sapphire.lua`,
+2. Open **Tools > Scripting**.
+3. Load the matching launcher: `Emerald.lua`, `Ruby.lua`, `Sapphire.lua`,
    `FireRed.lua`, or `LeafGreen.lua`.
+4. Open the matching ROM if it is not already loaded. The launcher will wait
+   safely until mGBA provides the game core.
 
 Use the controls shown in the scripting panels to switch tools. Tab is left
 unbound so it remains available for mGBA fast-forward. The shared frame clock
 keeps the panels and automation responsive while fast-forwarding.
 
 Runtime settings and savestates are intentionally excluded from Git.
-
-## Tests
-
-Pure Lua checks are available under `tests`. On Windows with Lua installed:
-
-```powershell
-.\tests\run_all.ps1
-```
