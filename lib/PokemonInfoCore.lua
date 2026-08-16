@@ -7,7 +7,8 @@ local CONFIG={
  BPR={name="FireRed",seed=0x03005000,partyCount=0x02024029,party=0x02024284,enemy=0x0202402C,save1Ptr=0x03005008,save2Ptr=0x0300500C},
  BPG={name="LeafGreen",seed=0x03005000,partyCount=0x02024029,party=0x02024284,enemy=0x0202402C,save1Ptr=0x03005008,save2Ptr=0x0300500C},
 }
-local game=CONFIG[emu:getGameCode():sub(1,3)]
+local gameCode=GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
+local game=CONFIG[gameCode:sub(1,3)]
 if not game then error("Pokemon Info supports English Emerald, Ruby, Sapphire, FireRed, and LeafGreen.") end
 local suiteDir=GEN3_SUITE_DIR or STARTER_HUNTER_DIR or (script and script.dir)
 if not suiteDir then error("Load Pokemon Info and Capture.lua instead of lib/PokemonInfoCore.lua directly.") end

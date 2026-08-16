@@ -2,7 +2,7 @@
 -- H starts or stops. The script spins in place, flees ordinary wild battles,
 -- and releases every automated input as soon as a shiny opponent is resolved.
 
-local code=emu:getGameCode()
+local code=GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
 local supported={BPEE=true,AXVE=true,AXPE=true,BPRE=true,BPGE=true}
 if not supported[code] then error("Hunter requires an English Gen 3 Pokemon game.") end
 

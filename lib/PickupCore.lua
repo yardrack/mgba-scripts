@@ -3,7 +3,8 @@
 -- found by Pickup into the Bag after each won battle. The strongest healthy
 -- battler stays in front while healthy Pickup Pokemon share battle experience.
 
-if emu:getGameCode()~="BPEE" then return end
+local code=GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
+if code~="BPEE" then return end
 
 local suiteDir=GEN3_SUITE_DIR or (script and script.dir)
 if not suiteDir then error("Load Pickup.lua instead of lib/PickupCore.lua directly.") end
@@ -12,7 +13,7 @@ local ItemStorage=dofile(suiteDir.."/lib/ItemStorage.lua")
 local PickupFilter=dofile(suiteDir.."/lib/PickupFilter.lua")
 local InventoryCore=dofile(suiteDir.."/lib/InventoryCore.lua")
 local gameData=dofile(suiteDir.."/lib/GameProfiles.lua")
-local game=assert(gameData.resolve(emu:getGameCode(),emu:read8(0x080000BC)),"No Emerald memory profile")
+local game=assert(gameData.resolve(code,emu:read8(0x080000BC)),"No Emerald memory profile")
 local stats=GEN3_SESSION_STATS or dofile(suiteDir.."/lib/SessionStats.lua").forGame(emu,"BPEE")
 
 local PARTY_COUNT,PARTY=0x020244E9,0x020244EC

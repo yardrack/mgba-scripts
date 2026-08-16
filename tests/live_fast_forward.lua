@@ -18,7 +18,7 @@ local function finish(text)
     write(resultPath,text)
 end
 
-local code=emu:getGameCode()
+local code=dofile(root.."/lib/GameCode.lua").current(emu)
 if not root or not resultPath or not names[code] then
     finish("FAIL invalid environment or unsupported game")
     return

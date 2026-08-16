@@ -11,7 +11,7 @@ local function finish(text)
     finished=true
 end
 
-local code=emu:getGameCode()
+local code=dofile(root.."/lib/GameCode.lua").current(emu)
 local gameName=names[code]
 if not root or not resultPath or not gameName then
     finish("FAIL invalid test environment or unsupported code "..tostring(code))

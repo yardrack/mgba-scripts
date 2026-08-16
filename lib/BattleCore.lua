@@ -1,7 +1,8 @@
 -- Standalone Emerald battle-grinding core for mGBA.
 -- B starts/stops. 1/2 select Lead/Balanced. H toggles 20/30% healing.
 
-if emu:getGameCode()~="BPEE" then return end
+local code=GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
+if code~="BPEE" then return end
 local suiteDir=GEN3_SUITE_DIR or (script and script.dir)
 local frameClock=GEN3_FRAME_CLOCK or dofile(suiteDir.."/lib/FrameClock.lua")
 local stats=GEN3_SESSION_STATS or dofile(suiteDir.."/lib/SessionStats.lua").forGame(emu,"BPEE")

@@ -9,9 +9,9 @@ local ItemStorage=dofile(suiteDir.."/lib/ItemStorage.lua")
 local PickupFilter=dofile(suiteDir.."/lib/PickupFilter.lua")
 local InventoryCore=dofile(suiteDir.."/lib/InventoryCore.lua")
 local gameData=dofile(suiteDir.."/lib/GameProfiles.lua")
-local stats=GEN3_SESSION_STATS or dofile(suiteDir.."/lib/SessionStats.lua").forGame(emu,emu:getGameCode())
+local code=GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
+local stats=GEN3_SESSION_STATS or dofile(suiteDir.."/lib/SessionStats.lua").forGame(emu,code)
 
-local code=emu:getGameCode()
 local revision=emu:read8(0x080000BC)
 local game=gameData.resolve(code,revision)
 if not game or game.family=="E" then return end

@@ -6,7 +6,7 @@ if combined then kind="starter" end
 if kind~="starter" and kind~="wild" then error("ManualMonitor needs starter, wild, or combined mode.") end
 
 local supported={BPEE=true,AXVE=true,AXPE=true,BPRE=true,BPGE=true}
-local gameCode=emu:getGameCode()
+local gameCode=GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
 if not supported[gameCode] then
     error("Manual monitors support English Emerald, Ruby, Sapphire, FireRed, and LeafGreen.")
 end

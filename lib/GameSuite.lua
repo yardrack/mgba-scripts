@@ -3,13 +3,16 @@
 
 local suiteDir=GEN3_SUITE_DIR or STARTER_HUNTER_DIR or (script and script.dir)
 if not suiteDir then error("The game suite could not locate its script folder.") end
-local code=emu:getGameCode()
+local gameCode=dofile(suiteDir.."/lib/GameCode.lua")
+local reportedCode=emu:getGameCode()
+local code=gameCode.normalize(reportedCode)
 if code~=GEN3_SUITE_GAME then
-    error(string.format("This suite is for %s, not ROM code %s.",GEN3_SUITE_NAME or GEN3_SUITE_GAME,code))
+    error(string.format("This suite is for %s, not ROM code %s.",GEN3_SUITE_NAME or GEN3_SUITE_GAME,tostring(reportedCode)))
 end
 
 GEN3_SUITE_DIR=suiteDir
 STARTER_HUNTER_DIR=suiteDir
+GEN3_GAME_CODE=code
 GEN3_SUITE_MANAGED=true
 GEN3_SUITE_ACTIVE_TOOL="Capture"
 STARTER_HUNTER_CAPTURE_ONLY=true

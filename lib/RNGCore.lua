@@ -33,7 +33,7 @@ local gameData=dofile(suiteDir.."/lib/GameProfiles.lua")
 local rngMath=dofile(suiteDir.."/lib/RNGMath.lua")
 local NATURES,GAME_CONFIGS=gameData.natures,gameData.profiles
 
-local gameCode = emu:getGameCode()
+local gameCode = GEN3_GAME_CODE or tostring(emu:getGameCode()):sub(-4)
 local game = gameData.resolve(gameCode,emu:read8(0x080000BC))
 if not game then error("Pokemon RNG tools support main-series Gen 3 Pokemon games only.") end
 

@@ -15,7 +15,7 @@ local function finish(text)
     local file=io.open(resultPath,"w"); if file then file:write(text.."\n"); file:close() end
     finished=true
 end
-local code=emu:getGameCode()
+local code=dofile(root.."/lib/GameCode.lua").current(emu)
 if not root or not resultPath or not checkpoint or not names[code] then finish("FAIL environment"); return end
 
 GEN3_SUITE_GAME=code; GEN3_SUITE_NAME=names[code]; GEN3_SUITE_DIR=root; STARTER_HUNTER_DIR=root
