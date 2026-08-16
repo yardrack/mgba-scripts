@@ -18,6 +18,9 @@ battling, Pickup farming, and shiny encounter hunting.
 4. Open the matching ROM if it is not already loaded. The launcher will wait
    safely until mGBA provides the game core.
 
+The suite also detects the loaded game automatically, so choosing a different
+Gen 3 launcher by mistake will not prevent it from starting.
+
 Use the controls shown in the scripting panels to switch tools. Tab is left
 unbound so it remains available for mGBA fast-forward. The shared frame clock
 keeps the panels and automation responsive while fast-forwarding.

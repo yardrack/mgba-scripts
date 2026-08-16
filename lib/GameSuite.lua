@@ -6,13 +6,19 @@ if not suiteDir then error("The game suite could not locate its script folder.")
 local gameCode=dofile(suiteDir.."/lib/GameCode.lua")
 local reportedCode=emu:getGameCode()
 local code=gameCode.normalize(reportedCode)
-if code~=GEN3_SUITE_GAME then
-    error(string.format("This suite is for %s, not ROM code %s.",GEN3_SUITE_NAME or GEN3_SUITE_GAME,tostring(reportedCode)))
+local gameNames={BPEE="Emerald",AXVE="Ruby",AXPE="Sapphire",BPRE="FireRed",BPGE="LeafGreen"}
+if not gameNames[code] then
+    error("This suite supports English Pokemon Emerald, Ruby, Sapphire, FireRed, and LeafGreen; detected ROM code "..tostring(reportedCode)..".")
+end
+if code~=GEN3_SUITE_GAME and console and console.warn then
+    console:warn(string.format("Loaded %s while using the %s launcher; continuing with automatic detection.",gameNames[code],GEN3_SUITE_NAME or GEN3_SUITE_GAME))
 end
 
 GEN3_SUITE_DIR=suiteDir
 STARTER_HUNTER_DIR=suiteDir
 GEN3_GAME_CODE=code
+GEN3_SUITE_GAME=code
+GEN3_SUITE_NAME=gameNames[code]
 GEN3_SUITE_MANAGED=true
 GEN3_SUITE_ACTIVE_TOOL="Capture"
 STARTER_HUNTER_CAPTURE_ONLY=true
