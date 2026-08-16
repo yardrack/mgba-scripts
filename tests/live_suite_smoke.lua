@@ -17,11 +17,10 @@ if not root or not resultPath or not gameName then
     finish("FAIL invalid test environment or unsupported code "..tostring(code))
     return
 end
-GEN3_SUITE_GAME=code
-GEN3_SUITE_NAME=gameName
-GEN3_SUITE_DIR=root
-STARTER_HUNTER_DIR=root
-local ok,problem=xpcall(function() dofile(root.."/lib/GameSuite.lua") end,debug.traceback)
+-- Stable mGBA 0.10 builds do not expose the newer global `script` object.
+-- Remove it deliberately and load the public launcher to cover that path.
+script=nil
+local ok,problem=xpcall(function() dofile(root.."/"..gameName..".lua") end,debug.traceback)
 if not ok then finish("FAIL load "..tostring(problem)); return end
 
 local frames=0

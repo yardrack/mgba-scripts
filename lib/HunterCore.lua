@@ -6,7 +6,8 @@ local code=emu:getGameCode()
 local supported={BPEE=true,AXVE=true,AXPE=true,BPRE=true,BPGE=true}
 if not supported[code] then error("Hunter requires an English Gen 3 Pokemon game.") end
 
-local suiteDir=GEN3_SUITE_DIR or script.dir
+local suiteDir=GEN3_SUITE_DIR or (script and script.dir)
+if not suiteDir then error("Hunter could not locate the suite folder.") end
 STARTER_HUNTER_DIR=suiteDir
 local frameClock=GEN3_FRAME_CLOCK or dofile(suiteDir.."/lib/FrameClock.lua")
 local revision=emu:read8(0x080000BC)
