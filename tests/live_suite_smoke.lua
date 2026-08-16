@@ -31,6 +31,8 @@ callbacks:add("frame",function()
     local okStep,stepProblem=xpcall(function()
         if frames==30 then
             assert(Gen3Suite and Gen3Suite:getState().tool=="Capture")
+            Gen3Suite.handleKey({state=1,modifiers=0,key=9})
+            assert(Gen3Suite:getState().tool=="Capture","Tab changed tools instead of remaining available for fast-forward")
         elseif frames==42 then
             Gen3Suite.selectTool("Battle"); Battle:start(); Battle:stop()
         elseif frames==54 then

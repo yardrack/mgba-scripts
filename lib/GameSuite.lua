@@ -80,10 +80,9 @@ local function selectTool(value)
     return true
 end
 
-callbacks:add("key",function(event)
+local function onKey(event)
     if event.state~=1 or ((event.modifiers or 0)&0xC)~=0 then return end
     local key=event.key
-    if key==9 then selectTool(toolIndex+1); return end
     if key>=8388609 and key<=8388612 then selectTool(key-8388608); return end
     if key<32 or key>126 then return end
     local c=string.char(key):lower()
@@ -117,7 +116,8 @@ callbacks:add("key",function(event)
         -- Capture retains its G/M/Q/I controls. Hunter owns H while selected.
         return
     end
-end)
+end
+callbacks:add("key",onKey)
 
 -- There is deliberately no suite console tab. Individual tools render their
 -- own buffers, so rebuilding the hidden router text every 30 frames only adds
@@ -125,6 +125,7 @@ end)
 
 Gen3Suite={
     selectTool=selectTool,
+    handleKey=onKey,
     currentTool=function() return tools[toolIndex] end,
     tools=function() local copy={} for i,v in ipairs(tools) do copy[i]=v end; return copy end,
     stop=stopAutomation,

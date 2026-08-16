@@ -17,9 +17,9 @@ battling, Pickup farming, and shiny encounter hunting.
 4. Load the matching launcher: `Emerald.lua`, `Ruby.lua`, `Sapphire.lua`,
    `FireRed.lua`, or `LeafGreen.lua`.
 
-Use Tab or the controls shown in the scripting panels to switch tools. The
-shared frame clock keeps the panels and automation responsive during mGBA
-fast-forward.
+Use the controls shown in the scripting panels to switch tools. Tab is left
+unbound so it remains available for mGBA fast-forward. The shared frame clock
+keeps the panels and automation responsive while fast-forwarding.
 
 Runtime settings and savestates are intentionally excluded from Git.
 
