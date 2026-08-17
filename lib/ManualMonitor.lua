@@ -121,7 +121,7 @@ local function render(force)
         "Trainer TID / SID "..(captureTid and captureSid and string.format("%05d / %05d",captureTid,captureSid) or "waiting for live state"),
         string.format("Current Frame     %d",state.videoFrame),
         string.format("Advances          %d",state.myFrame),
-        "Target Frame      "..state.inputText.."  (G edit)",
+        "Target RNG Frame  "..state.inputText.."  (G edit, J jump)",
         "Hit Frame         "..(state.landedFrame and tostring(state.landedFrame) or (state.resolveError and "NO MATCH" or "--")),
         "Miss              "..miss,
         "Adjusted Offset   "..(state.adjustedOffset and string.format("%+d",state.adjustedOffset) or "--"),
@@ -218,7 +218,7 @@ callbacks:add("key",function(event)
     if event.state~=1 or ((event.modifiers or 0)&0xC)~=0 then return end
     local key=event.key
     if GEN3_SUITE_MANAGED then
-        local suiteKey=key==71 or key==103 or key==77 or key==109 or key==81 or key==113 or
+        local suiteKey=key==71 or key==103 or key==74 or key==106 or key==77 or key==109 or key==81 or key==113 or
             key==73 or key==105 or key==0x0A or key==0x0D or key==0x800050
         if not suiteKey then return end
     end
@@ -231,6 +231,13 @@ callbacks:add("key",function(event)
         pendingFrameInput=false
         lastStarterPid=0
         if kind=="wild" then pollWild(true) end
+    elseif not pendingFrameInput and (key==74 or key==106) then
+        stableResult=nil
+        local ok=starterHunter:jumpToFrame()
+        if ok then
+            lastStarterPid=observedPid
+            if kind=="wild" then lastWildPid=starterHunter:getEnemyPid() end
+        end
     elseif key==81 or key==113 then
         stableResult=nil
         starterHunter:resetFrameDiagnostics()
@@ -269,6 +276,7 @@ ManualMonitor={
     kind=kind,combined=combined,
     getKind=function() return kind end,
     switchMode=switchMode,
+    jumpToFrame=function(value) return starterHunter:jumpToFrame(value) end,
     snapshot=snapshot,
     render=function() render(true) end,
     testObserve=function(actual) return observeStarter(actual,true) end,

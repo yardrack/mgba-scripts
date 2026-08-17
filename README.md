@@ -25,4 +25,8 @@ Use the controls shown in the scripting panels to switch tools. Tab is left
 unbound so it remains available for mGBA fast-forward. The shared frame clock
 keeps the panels and automation responsive while fast-forwarding.
 
+In the Capture panel, press `G`, type a target RNG frame, and press Enter. Press
+`J` to jump the live RNG state directly to that frame. This changes the game's
+RNG state instantly; it does not change mGBA's separate video-frame counter.
+
 Runtime settings and savestates are intentionally excluded from Git.

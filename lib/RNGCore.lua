@@ -2360,6 +2360,41 @@ function starterHunter:setPreTimer(value)
 end
 function starterHunter:setSeed(value) local n=type(value)=="number" and value or tonumber(tostring(value),16); if not n then return false end; baseSeed=n&0xFFFFFFFF; target=nil; clearShinyTargets(); saveSettings(); render(true); return true end
 function starterHunter:setFrame(value) local n=tonumber(value); if not n or n<0 or n>MAX_SEARCH_FRAME then return false end; targetFrame=math.floor(n); clearShinyTargets(); evaluateTarget(); eonBridge.manualTargetArmed=true; saveSettings(); render(true); return true end
+function starterHunter:jumpToFrame(value)
+    local n=tonumber(value or targetFrame)
+    if not n or n<0 or n>MAX_SEARCH_FRAME then return false,"Frame must be between 0 and "..MAX_SEARCH_FRAME.."." end
+    if mode~="idle" and mode~="error" and mode~="success" then
+        return false,"Stop the active automation before jumping frames."
+    end
+
+    n=math.floor(n)
+    local jumpSeed=advanceSeed(baseSeed,n)
+    emu:write32(game.seed,jumpSeed)
+    if emu:read32(game.seed)~=jumpSeed then return false,"mGBA did not accept the RNG seed write." end
+
+    local previousFrame=eonBridge.manualTargetArmed and targetFrame or nil
+    targetFrame=n
+    clearShinyTargets()
+    evaluateTarget()
+    eonBridge.manualTargetArmed=true
+    if previousFrame~=targetFrame then hitCorrectionFrames=0 end
+    lastFrameResult,eonBridge.resolveJob,eonBridge.pidRecoveryJob=nil,nil,nil
+
+    -- A frame jump changes the live RNG state directly. Running thousands of
+    -- intermediate video frames would block mGBA's scripting window and can
+    -- miss the exact RNG advance when a game consumes more than one value in
+    -- a video frame. The selected target already contains the state immediately
+    -- before that frame's generated Pokemon, so writing it is exact and fast.
+    previousSeed=jumpSeed
+    liveAdvances=targetFrame
+    local current=readPokemon(game.enemy)
+    eonBridge.frameHitEnemyPid=current and current.valid and current.pid or 0
+    eonBridge.frameHitStatus=string.format("Jumped to RNG frame %d (seed %08X).",targetFrame,jumpSeed)
+    status=eonBridge.frameHitStatus
+    saveSettings()
+    render(true)
+    return true,jumpSeed
+end
 function starterHunter:findNext(a,b) return findNextShiny(a,b) end
 function starterHunter:findAsync() return startShinySearch() end
 function starterHunter:findAsyncFrom(value) return startShinySearch(value) end
