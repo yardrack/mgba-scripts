@@ -1,4 +1,4 @@
-# mGBA Gen 3 scripts
+# mgba-scripts
 
 Lua tools for the English releases of Pokemon Emerald, Ruby, Sapphire,
 FireRed, and LeafGreen. The suite includes RNG capture information, automated
