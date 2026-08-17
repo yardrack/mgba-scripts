@@ -501,7 +501,17 @@ local function evaluateTarget()
     -- PID/spread generation does not require trainer IDs. TID/SID are only
     -- needed to label shininess, so manual hit detection must remain usable
     -- while the save block is temporarily unreadable during battle.
-    target = targetFrame >= 0 and makeTarget(targetFrame,advanceSeed(baseSeed,targetFrame)) or nil
+    local evaluated=targetFrame >= 0 and makeTarget(targetFrame,advanceSeed(baseSeed,targetFrame)) or nil
+    local evaluatedPid=evaluated and evaluated.pid or nil
+    if evaluatedPid then
+        -- Calibration belongs to one exact seed/frame target. Reusing it after
+        -- that target changes creates impossible offsets unrelated to the miss.
+        if eonBridge.correctionTargetPid~=evaluatedPid then
+            hitCorrectionFrames,lastFrameResult=0,nil
+        end
+        eonBridge.correctionTargetPid=evaluatedPid
+    end
+    target=evaluated
 end
 
 local function checkpointPath()
@@ -516,15 +526,16 @@ local function checkpointReady() return fileExists(checkpointPath()) end
 local function saveSettings()
     if STARTER_HUNTER_DISABLE_SETTINGS then return end
     local file=io.open(SETTINGS_PATH,"w"); if not file then return end
-    file:write(string.format("%08X\n%d\n%d\n%.3f\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+    file:write(string.format("%08X\n%d\n%d\n%.3f\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%08X\n",
         baseSeed,targetFrame,starterIndex,preTimerSeconds,calibrationFrames,huntType,roamerIndex,
-        wildTypeIndex,wildAreaIndex,wildSpeciesIndex,wildMethod,simpleUi and 1 or 0,uiSizeIndex,hitCorrectionFrames))
+        wildTypeIndex,wildAreaIndex,wildSpeciesIndex,wildMethod,simpleUi and 1 or 0,uiSizeIndex,hitCorrectionFrames,
+        eonBridge.correctionTargetPid or 0))
     file:close()
 end
 local function loadSettings()
     if STARTER_HUNTER_DISABLE_SETTINGS then normalizeArea(); return end
     local file=io.open(SETTINGS_PATH,"r"); if not file then normalizeArea(); return end
-    local v={}; for i=1,14 do v[i]=file:read("*l") end; file:close()
+    local v={}; for i=1,15 do v[i]=file:read("*l") end; file:close()
     baseSeed=tonumber(v[1] or "",16) or baseSeed
     targetFrame=math.max(0,math.min(MAX_SEARCH_FRAME,tonumber(v[2]) or targetFrame))
     starterIndex=math.max(1,math.min(#game.starters,tonumber(v[3]) or starterIndex))
@@ -538,7 +549,10 @@ local function loadSettings()
     wildMethod=math.max(1,math.min(#WILD_METHODS,tonumber(v[11]) or wildMethod))
     simpleUi=(tonumber(v[12]) or (simpleUi and 1 or 0))~=0
     uiSizeIndex=math.max(1,math.min(#UI_SIZES,tonumber(v[13]) or uiSizeIndex))
-    hitCorrectionFrames=math.max(-10000,math.min(10000,tonumber(v[14]) or hitCorrectionFrames)); applyUiSize(); normalizeArea()
+    hitCorrectionFrames=math.max(-10000,math.min(10000,tonumber(v[14]) or hitCorrectionFrames))
+    local savedCorrectionPid=tonumber(v[15] or "",16)
+    eonBridge.correctionTargetPid=savedCorrectionPid and savedCorrectionPid~=0 and savedCorrectionPid or nil
+    applyUiSize(); normalizeArea()
 end
 
 local function ivText(ivs)
@@ -1975,7 +1989,7 @@ local function commitEdit()
             -- Keep calibration when G is used to review/re-enter the same shiny
             -- target. A genuinely different target gets a clean calibration;
             -- its PID and timing reference are different.
-            if previousFrame~=targetFrame then hitCorrectionFrames,lastFrameResult=0,nil end
+            if previousFrame~=targetFrame then lastFrameResult=nil end
             eonBridge.resolveJob,eonBridge.pidRecoveryJob=nil,nil
             local current=readPokemon(game.enemy)
             eonBridge.frameHitEnemyPid=current and current.valid and current.pid or 0
@@ -2213,13 +2227,28 @@ local function updateSessionAdvances()
     if previousSeed and current~=previousSeed then
         local distance=eonBridge.seedDistance(previousSeed,current)
         if distance and distance<=1000000 then liveAdvances=liveAdvances+distance
+        elseif game.sessionSeed then
+            local absolute=eonBridge.seedDistance(baseSeed,current)
+            if absolute and absolute<=MAX_SEARCH_FRAME then
+                liveAdvances=absolute
+            else
+                baseSeed,liveAdvances=current,0
+                target=nil; clearShinyTargets()
+            end
         else
             local absolute=eonBridge.seedDistance(baseSeed,current)
             liveAdvances=absolute and absolute<=MAX_SEARCH_FRAME and absolute or 0
         end
     elseif not previousSeed then
-        local absolute=eonBridge.seedDistance(baseSeed,current)
-        liveAdvances=absolute and absolute<=MAX_SEARCH_FRAME and absolute or 0
+        if game.sessionSeed then
+            -- Ruby/Sapphire do not retain a separate initial seed. Frame zero
+            -- is the live RNG state when Capture begins.
+            baseSeed,liveAdvances=current,0
+            target=nil; clearShinyTargets()
+        else
+            local absolute=eonBridge.seedDistance(baseSeed,current)
+            liveAdvances=absolute and absolute<=MAX_SEARCH_FRAME and absolute or 0
+        end
     end
     previousSeed=current
 end
@@ -2436,7 +2465,10 @@ end
 function starterHunter:getSeedState()
     local initial=baseSeed
     local current=emu:read32(game.seed)&0xFFFFFFFF
-    if game.initialSeed then
+    if game.sessionSeed and not previousSeed then
+        baseSeed,initial,liveAdvances,previousSeed=current,current,0,current
+        target=nil; clearShinyTargets()
+    elseif game.initialSeed then
         initial=game.initialSeedBits==16 and emu:read16(game.initialSeed) or emu:read32(game.initialSeed)
         initial=initial&0xFFFFFFFF
         if initial~=baseSeed then
@@ -2535,8 +2567,9 @@ function starterHunter:resolveStarterPid(pid,expectedTargetFrame,applyCalibratio
 
     if landed then
         local miss=landed-targetValue
-        local adjusted=applyCalibration~=false and math.abs(miss)<=1000
+        local adjusted=applyCalibration~=false and math.abs(miss)<=10000
         if adjusted then
+            eonBridge.correctionTargetPid=target and target.pid or eonBridge.correctionTargetPid
             hitCorrectionFrames=math.max(-10000,math.min(10000,hitCorrectionFrames-miss))
             saveSettings()
         end
@@ -2544,7 +2577,7 @@ function starterHunter:resolveStarterPid(pid,expectedTargetFrame,applyCalibratio
             correction=hitCorrectionFrames,pid=pid,adjusted=adjusted,method=1}
         eonBridge.frameHitStatus=adjusted
             and string.format("Starter PID %08X landed on frame %d (%+d). Recalibrated: %d.",pid,landed,miss,targetValue+hitCorrectionFrames)
-            or string.format("Starter PID %08X matched frame %d, but it is >1000 away; calibration unchanged.",pid,landed)
+            or string.format("Starter PID %08X matched frame %d, but it is outside the +/-10000 correction range.",pid,landed)
     else
         lastFrameResult={targetFrame=targetValue,landedFrame=nil,miss=nil,
             correction=hitCorrectionFrames,pid=pid,
@@ -2567,7 +2600,8 @@ function starterHunter:getFrameHitState()
         targetPid=target and target.pid or nil,targetShiny=target and target.shinyValue<8 or false,
         targetSpeciesMatch=target and target.speciesMatch~=false or false,targetPokemon=selectedPokemon(),
         targetArmed=eonBridge.manualTargetArmed,
-        correction=hitCorrectionFrames,nextAttemptFrame=math.max(0,targetFrame+hitCorrectionFrames),
+        correction=hitCorrectionFrames,correctionTargetPid=eonBridge.correctionTargetPid,
+        nextAttemptFrame=math.max(0,targetFrame+hitCorrectionFrames),
         resolving=eonBridge.resolveJob~=nil or eonBridge.pidRecoveryJob~=nil,
         editing=editMode=="frame",editText=editMode=="frame" and editText or nil}
 end
@@ -2619,8 +2653,11 @@ function starterHunter:resolveManualPokemon(actual,expectedTargetFrame)
     local expected=math.max(0,math.floor(tonumber(expectedTargetFrame) or targetFrame))
     return eonBridge.beginFrameHitResolve(actual,expected,false),"inspection started"
 end
-function starterHunter:resetFrameDiagnostics()
-    hitCorrectionFrames,lastFrameResult=0,nil
+function starterHunter:resetFrameDiagnostics(preserveCorrection)
+    if preserveCorrection~=true then
+        hitCorrectionFrames,eonBridge.correctionTargetPid=0,target and target.pid or nil
+    end
+    lastFrameResult=nil
     eonBridge.resolveJob,eonBridge.pidRecoveryJob=nil,nil
     eonBridge.frameHitStatus="Waiting for the next Pokemon encounter."
     saveSettings(); return true

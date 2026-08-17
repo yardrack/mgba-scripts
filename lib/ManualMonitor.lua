@@ -59,7 +59,9 @@ if kind=="wild" then
     starterHunter:setWildMethod(2)
     starterHunter:detectWildArea(true)
 end
-starterHunter:resetFrameDiagnostics()
+-- Clear stale encounter details without erasing calibration from the previous
+-- attempt when the monitor is reloaded.
+starterHunter:resetFrameDiagnostics(true)
 
 -- TID/SID live in the save block and can be temporarily unreadable while a
 -- state is loading or the game is changing callbacks.  Keep a local display
@@ -84,6 +86,7 @@ panel:setSize(WIDTH,HEIGHT)
 
 local observedPid,lastStarterPid,lastWildPid,observedPokemon=0,0,0,nil
 local pinnedStarterPid,stableResult=0,nil
+local starterBaselinePid=0
 local pendingFrameInput=false
 local lastText,lastRenderClock="",os.clock()
 local REFRESH_SECONDS=0.10
@@ -121,8 +124,8 @@ local function snapshot()
         landedFrame=result and result.landedFrame or nil,
         resolveError=result and result.error or nil,
         miss=result and result.miss or nil,
-        adjustedOffset=inputFrame and result and result.landedFrame and correction or nil,
-        correctedFrame=inputFrame and result and result.landedFrame and math.max(0,inputFrame+correction) or nil,
+        adjustedOffset=inputFrame and correction or nil,
+        correctedFrame=inputFrame and math.max(0,inputFrame+correction) or nil,
         targetPid=targetDetails and targetDetails.pid or nil,
         targetIsShiny=targetDetails and targetDetails.shinyValue<8 or false,
         shinyPid=targetDetails and targetDetails.shinyValue<8 and targetDetails.pid or nil,
@@ -132,6 +135,7 @@ local function snapshot()
             or state.pid or 0,
         pokemon=pokemon,
         resolving=state.resolving,
+        waitingFreshStarter=kind=="starter" and starterBaselinePid~=0,
         editing=state.editing,searching=searching
     }
 end
@@ -150,7 +154,8 @@ local function render(force)
         string.format("Current Frame     %d",state.videoFrame),
         string.format("Advances          %d",state.myFrame),
         "Target Frame      "..state.inputText.."  (G edit)",
-        "Hit Frame         "..(state.landedFrame and tostring(state.landedFrame) or (state.resolveError and "NO MATCH" or "--")),
+        "Hit Frame         "..(state.landedFrame and tostring(state.landedFrame)
+            or (state.waitingFreshStarter and "WAIT RESET" or (state.resolveError and "NO MATCH" or "--"))),
         "Miss              "..miss,
         "Adjusted Offset   "..(state.adjustedOffset and string.format("%+d",state.adjustedOffset) or "--"),
         "Corrected Frame   "..(state.correctedFrame and tostring(state.correctedFrame) or "--"),
@@ -216,7 +221,7 @@ local function switchMode()
     if kind=="wild" then starterHunter:setWildMethod(2); starterHunter:detectWildArea(true) end
     starterHunter:resetFrameDiagnostics()
     observedPid,lastStarterPid,lastWildPid,observedPokemon=0,0,0,nil
-    pinnedStarterPid,stableResult=0,nil
+    pinnedStarterPid,stableResult,starterBaselinePid=0,nil,0
     pendingFrameInput=false
     render(true)
     return true
@@ -228,12 +233,21 @@ local function pollStarter(force)
     if pinnedStarterPid~=0 then
         for slot=1,6 do
             local actual=starterHunter:getPartyPokemon(slot)
-            if actual and actual.pid==pinnedStarterPid then return observeStarter(actual,force) end
+            if actual and actual.pid==pinnedStarterPid then
+                if starterBaselinePid~=0 and actual.pid==starterBaselinePid then return false end
+                starterBaselinePid=0
+                return observeStarter(actual,force)
+            end
         end
     end
     for slot=1,6 do
         local actual=starterHunter:getPartyPokemon(slot)
-        if actual then pinnedStarterPid=actual.pid; return observeStarter(actual,force) end
+        if actual then
+            pinnedStarterPid=actual.pid
+            if starterBaselinePid~=0 and actual.pid==starterBaselinePid then return false end
+            starterBaselinePid=0
+            return observeStarter(actual,force)
+        end
     end
     -- A reset/savestate can remove the starter before the next attempt. Clear
     -- the remembered PID so that even a repeated generation is inspected.
@@ -258,10 +272,18 @@ callbacks:add("key",function(event)
     elseif pendingFrameInput and (key==0x0A or key==0x0D or key==0x800050) then
         pendingFrameInput=false
         lastStarterPid=0
-        if kind=="wild" then pollWild(true) end
+        if kind=="starter" then
+            -- Ignore a starter left over from the previous attempt. Calibration
+            -- begins only after reset replaces it with a newly generated PID.
+            local existing=nil
+            for slot=1,6 do existing=starterHunter:getPartyPokemon(slot); if existing then break end end
+            starterBaselinePid=existing and existing.pid or 0
+            if starterBaselinePid==0 then pollStarter(true) end
+        else pollWild(true) end
     elseif key==81 or key==113 then
         stableResult=nil
         starterHunter:resetFrameDiagnostics()
+        starterBaselinePid=0
         lastStarterPid,lastWildPid=0,starterHunter:getEnemyPid()
     elseif key==73 or key==105 then
         if kind=="starter" then pollStarter(true) else pollWild(true) end
@@ -277,8 +299,9 @@ frameClock:add(function()
     if GEN3_SUITE_ACTIVE_TOOL and GEN3_SUITE_ACTIVE_TOOL~="Capture" then return end
     frameCounter=frameCounter+1
     if frameCounter%30==0 then refreshTrainerIds() end
-    if not STARTER_HUNTER_MANUAL_TEST and frameCounter%6==0 then
-        if kind=="starter" then pollStarter(false) else pollWild(false) end
+    if not STARTER_HUNTER_MANUAL_TEST then
+        if kind=="starter" then pollStarter(false)
+        elseif frameCounter%6==0 then pollWild(false) end
     end
     -- Normal play uses a wall-clock throttle so the console stays light. In
     -- fast-forward mGBA can execute many emulated frames before that clock

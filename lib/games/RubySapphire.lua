@@ -1,6 +1,7 @@
 local shared={
     family="RS",
     seed=0x03004818,partyCount=0x03004350,party=0x03004360,enemy=0x030045C0,
+    sessionSeed=true,
     save1=0x02025734,save2=0x02024EA4,storage=0x020300A0,roamerOffset=0x3144,buggedRoamer=true,
     gMain=0x03001770,cb2Battle=0x0800F808,startMenuCursor=0x0202E8FC,mapHeader=0x0202E828,objectEvents=0x030048A0,
     playerAvatar=0x0202E858,backupMapLayout=0x03004870,sweetScentEncounter=0x0808531C,createMon=0x0803A798,starterCreateDest=0x03007DB4,
