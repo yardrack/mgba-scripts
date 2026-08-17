@@ -36,6 +36,7 @@ MANUAL_MONITOR_KIND="combined"
 MANUAL_MONITOR_PANEL_NAME="Capture"
 MANUAL_MONITOR_DEFAULT_KIND="starter"
 dofile(suiteDir.."/lib/ManualMonitor.lua")
+dofile(suiteDir.."/lib/JumpCore.lua")
 
 -- Battle and Pickup share one automation core.  Emerald retains its richer
 -- battle implementation while the other games use the common profile core.
@@ -49,7 +50,7 @@ else
 end
 dofile(suiteDir.."/lib/HunterCore.lua")
 
-local tools={"Capture","Battle","Pickup","Hunter"}
+local tools={"Capture","Battle","Pickup","Hunter","Jump"}
 local toolIndex=1
 
 local function battleActive()
@@ -64,10 +65,17 @@ local function pickupActive()
     return Pickup and Pickup.isRunning and Pickup:isRunning() or false
 end
 
+local function jumpActive()
+    if not Jump or not Jump.getState then return false end
+    local state=Jump:getState().phase
+    return state=="armed" or state=="waiting" or state=="resolving"
+end
+
 local function stopAutomation()
     if battleActive() then Battle:stop() end
     if pickupActive() and Pickup.stop then Pickup:stop() end
     if hunterActive() then Hunter:stop() end
+    if jumpActive() and Jump.stop then Jump:stop("Jump stopped because another tool was selected.") end
     emu:setKeys(0)
     if emu.clearKeys then emu:clearKeys(0x3FF) end
 end
@@ -92,7 +100,7 @@ end
 local function onKey(event)
     if event.state~=1 or ((event.modifiers or 0)&0xC)~=0 then return end
     local key=event.key
-    if key>=8388609 and key<=8388612 then selectTool(key-8388608); return end
+    if key>=8388609 and key<=8388613 then selectTool(key-8388608); return end
     if key<32 or key>126 then return end
     local c=string.char(key):lower()
     local current=tools[toolIndex]
@@ -104,6 +112,8 @@ local function onKey(event)
         selectTool("Pickup"); Pickup:start(); return
     elseif c=="h" and current~="Hunter" and not (current=="Battle" and code=="BPEE") then
         selectTool("Hunter"); Hunter:start(); return
+    elseif c=="j" and current~="Jump" then
+        selectTool("Jump"); return
     end
     if current=="Battle" then
         if c=="b" then if battleActive() then Battle:stop() else Battle:start() end
@@ -122,7 +132,7 @@ local function onKey(event)
     elseif current=="Hunter" then
         return
     else
-        -- Capture retains its G/M/Q/I controls. Hunter owns H while selected.
+        -- Capture retains G/M/Q/I. Jump owns G/F/M/R/Q while selected.
         return
     end
 end
@@ -140,7 +150,7 @@ Gen3Suite={
     stop=stopAutomation,
     getState=function()
         return {game=GEN3_SUITE_NAME or code,code=code,tool=tools[toolIndex],
-            battle=battleActive(),pickup=pickupActive(),hunter=hunterActive(),
+            battle=battleActive(),pickup=pickupActive(),hunter=hunterActive(),jump=jumpActive(),
             stats=GEN3_SESSION_STATS:all()}
     end
 }

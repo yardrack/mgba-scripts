@@ -2093,7 +2093,7 @@ local function onKey(event)
     local key=event.key
     if STARTER_HUNTER_CAPTURE_ONLY and not editMode and key~=71 and key~=103 then return end
     if GEN3_SUITE_ACTIVE_TOOL then
-        if GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then return end
+        if GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="Jump" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then return end
         if GEN3_SUITE_ACTIVE_TOOL=="Capture" and not editMode and key~=KEY_ESCAPE and key~=71 and key~=103 then return end
     end
     if editMode then
@@ -2226,7 +2226,7 @@ end
 
 local function onFrame()
     automationKeyMask=0
-    if GEN3_SUITE_ACTIVE_TOOL and GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then
+    if GEN3_SUITE_ACTIVE_TOOL and GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="Jump" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then
         return
     end
     frameCounter=frameCounter+1
@@ -2394,6 +2394,29 @@ function starterHunter:jumpToFrame(value)
     saveSettings()
     render(true)
     return true,jumpSeed
+end
+function starterHunter:lockTargetFrame(value)
+    if value~=nil and not starterHunter:setFrame(value) then return false,"Invalid target frame." end
+    if not eonBridge.manualTargetArmed then return false,"Press G and enter a target frame first." end
+    if not target then evaluateTarget() end
+    local details=starterHunter:getManualTargetDetails()
+    if not target or not details then return false,"The target is unavailable for the current mode or encounter area." end
+    if details.shinyValue>=8 then return false,string.format("Frame %d is not shiny for the current TID/SID.",targetFrame) end
+    if huntType==3 and details.speciesMatch==false then return false,"The target frame does not generate the selected wild Pokemon." end
+
+    local correctedFrame=math.max(0,targetFrame+hitCorrectionFrames)
+    local lockSeed=offsetSeed(target.lockSeed,hitCorrectionFrames)
+    emu:write32(game.seed,lockSeed)
+    if emu:read32(game.seed)~=lockSeed then return false,"mGBA did not accept the RNG lock." end
+    previousSeed=lockSeed
+    liveAdvances=math.max(0,correctedFrame-1)
+    return true,{seed=lockSeed,targetFrame=targetFrame,correctedFrame=correctedFrame,
+        correction=hitCorrectionFrames,pid=details.pid,shinyValue=details.shinyValue,
+        method=details.method or (huntType==3 and WILD_METHODS[wildMethod] or 1),pokemon=selectedPokemon()}
+end
+function starterHunter:cancelFrameResolve()
+    eonBridge.resolveJob,eonBridge.pidRecoveryJob=nil,nil
+    return true
 end
 function starterHunter:findNext(a,b) return findNextShiny(a,b) end
 function starterHunter:findAsync() return startShinySearch() end
