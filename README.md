@@ -25,16 +25,14 @@ Use the controls shown in the scripting panels to switch tools. Tab is left
 unbound so it remains available for mGBA fast-forward. The shared frame clock
 keeps the panels and automation responsive while fast-forwarding.
 
-Press `J` (or `F5`) to open the standalone Jump tool. Choose Starter or Wild
-with `M`, press `G` to enter a known shiny frame (or `F` to search), and stop at
-the final Yes button or highlighted Sweet Scent action. Press `R` to arm Jump;
-it holds the corrected RNG state until your mapped GBA A button (`X` by
-default) is detected. The result is verified automatically. A miss updates the
-saved correction and tells you to soft reset, return to the ready action, and
-press `R` again.
+Press `J` (or `F5`) to open the standalone Jump tool. Press `G`, type an RNG
+frame, and press Enter. The game RNG moves directly to that frame immediately.
+Jump does not inspect Pokemon, hold the seed, automate input, calibrate
+offsets, or change mGBA's separate video-frame counter.
 
-Stable mGBA Lua cannot pause or fast-forward the Qt frontend. Jump therefore
-holds the RNG state until A instead of relying on reaction time or frontend
-pause shortcuts. `Ctrl+N` remains mGBA's normal frame-advance shortcut.
+The Jump panel shows `Current frame (mGBA)` separately from `Current RNG
+position`. While paused, each `Ctrl+N` advances the mGBA frame by exactly one;
+the RNG position may advance by several values because the game can call its
+random-number generator multiple times during one emulated frame.
 
 Runtime settings and savestates are intentionally excluded from Git.

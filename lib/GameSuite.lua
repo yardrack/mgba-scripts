@@ -65,17 +65,10 @@ local function pickupActive()
     return Pickup and Pickup.isRunning and Pickup:isRunning() or false
 end
 
-local function jumpActive()
-    if not Jump or not Jump.getState then return false end
-    local state=Jump:getState().phase
-    return state=="armed" or state=="waiting" or state=="resolving"
-end
-
 local function stopAutomation()
     if battleActive() then Battle:stop() end
     if pickupActive() and Pickup.stop then Pickup:stop() end
     if hunterActive() then Hunter:stop() end
-    if jumpActive() and Jump.stop then Jump:stop("Jump stopped because another tool was selected.") end
     emu:setKeys(0)
     if emu.clearKeys then emu:clearKeys(0x3FF) end
 end
@@ -150,7 +143,7 @@ Gen3Suite={
     stop=stopAutomation,
     getState=function()
         return {game=GEN3_SUITE_NAME or code,code=code,tool=tools[toolIndex],
-            battle=battleActive(),pickup=pickupActive(),hunter=hunterActive(),jump=jumpActive(),
+            battle=battleActive(),pickup=pickupActive(),hunter=hunterActive(),jump=false,
             stats=GEN3_SESSION_STATS:all()}
     end
 }
