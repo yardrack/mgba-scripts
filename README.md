@@ -27,6 +27,7 @@ keeps the panels and automation responsive while fast-forwarding.
 
 Capture reads the game's hardware VBlank counter directly. While paused with
 `Ctrl+P`, each `Ctrl+N` advances `Current Frame` by exactly one even if mGBA
-emits several scripting callbacks for that frontend action.
+executes several frames from Windows keyboard-repeat events. Release `N`
+between steps; holding it is treated as one physical frame-step press.
 
 Runtime settings and savestates are intentionally excluded from Git.

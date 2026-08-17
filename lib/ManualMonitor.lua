@@ -16,7 +16,7 @@ if not suiteDir then error("The manual monitor could not locate the suite folder
 STARTER_HUNTER_DIR=suiteDir
 local frameClock=GEN3_FRAME_CLOCK or dofile(suiteDir.."/lib/FrameClock.lua")
 local gameProfile=dofile(suiteDir.."/lib/GameProfiles.lua").resolve(gameCode,emu:read8(0x080000BC))
-local function captureFrame()
+local function rawCaptureFrame()
     -- Gen III increments gMain.vblankCounter2 once in the hardware VBlank
     -- interrupt. Counter 1 is a pointer in FR/LG, while counter 2 is a direct
     -- u32 in all five games. Reading it makes paused Ctrl+N stepping exact
@@ -24,6 +24,25 @@ local function captureFrame()
     return gameProfile and gameProfile.gMain and emu:read32(gameProfile.gMain+0x24)
         or frameClock:currentFrame()
 end
+local captureClock=dofile(suiteDir.."/lib/CaptureClock.lua").new(rawCaptureFrame())
+local function captureFrame() return captureClock:value() end
+callbacks:add("key",function(event)
+    local key=tonumber(event.key)
+    local state=tonumber(event.state)
+    local modifiers=tonumber(event.modifiers) or 0
+    local inputState=C and C.INPUT_STATE or {}
+    local keyMods=C and C.KMOD or {}
+    local control=tonumber(keyMods.CONTROL) or 0
+    if control==0 or (modifiers&control)==0 then return end
+    if key==string.byte("N") or key==string.byte("n") then
+        captureClock:frameAdvanceKey(state,inputState.DOWN,inputState.UP)
+    elseif (key==string.byte("P") or key==string.byte("p")) and state==inputState.DOWN then
+        -- Whether this press pauses or resumes, Ctrl+N will arm suppression
+        -- again when needed. Re-anchoring here also supports scripts loaded
+        -- while mGBA was already paused.
+        captureClock:resume(rawCaptureFrame())
+    end
+end)
 STARTER_HUNTER_ENCOUNTER_DATA=dofile(suiteDir.."/lib/encounter_data.lua")
 if not MANUAL_MONITOR_SHOW_RNG_PANELS then STARTER_HUNTER_HIDE_CORE_UI=true end
 STARTER_HUNTER_DIAGNOSTIC=true
@@ -254,6 +273,7 @@ end)
 
 local frameCounter=0
 frameClock:add(function()
+    captureClock:update(rawCaptureFrame())
     if GEN3_SUITE_ACTIVE_TOOL and GEN3_SUITE_ACTIVE_TOOL~="Capture" then return end
     frameCounter=frameCounter+1
     if frameCounter%30==0 then refreshTrainerIds() end
