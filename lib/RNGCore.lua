@@ -2093,7 +2093,10 @@ local function onKey(event)
     local key=event.key
     if STARTER_HUNTER_CAPTURE_ONLY and not editMode and key~=71 and key~=103 then return end
     if GEN3_SUITE_ACTIVE_TOOL then
-        if GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="Jump" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then return end
+        -- Jump owns its target editor.  Letting this shared Capture editor
+        -- consume G made typing in the Jump panel appear under Capture.
+        if GEN3_SUITE_ACTIVE_TOOL=="Jump" then return end
+        if GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then return end
         if GEN3_SUITE_ACTIVE_TOOL=="Capture" and not editMode and key~=KEY_ESCAPE and key~=71 and key~=103 then return end
     end
     if editMode then

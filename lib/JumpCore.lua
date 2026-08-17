@@ -18,6 +18,10 @@ local jumpMode="starter"
 local phase="idle"
 local status="Press G for a target, then R when the final A press is ready."
 local targetInfo=nil
+local jumpTargetFrame=nil
+local editing=false
+local editText=""
+local searching=false
 local actualPokemon=nil
 local initialPartyCount=0
 local initialEnemyPid=0
@@ -44,11 +48,12 @@ local function snapshot()
     local hit=starterHunter:getFrameHitState()
     local runtime=starterHunter:getRuntimeState()
     local result=hit.result
-    local editing=hit.editing and ((hit.editText or "").."_") or nil
+    local targetText=editing and ((editText or "").."_")
+        or (jumpTargetFrame~=nil and tostring(jumpTargetFrame) or "G to enter")
     return {
         mode=jumpMode,phase=phase,status=status,
         currentFrame=hit.currentFrame,targetFrame=hit.targetFrame,
-        targetText=editing or (hit.targetArmed and tostring(hit.targetFrame) or "G to enter"),
+        targetText=targetText,
         correction=hit.correction or 0,correctedFrame=hit.nextAttemptFrame,
         targetPid=targetInfo and targetInfo.pid or hit.targetPid,
         targetShiny=targetInfo and targetInfo.shinyValue<8 or hit.targetShiny,
@@ -90,7 +95,8 @@ local function setMode(value)
     jumpMode=tostring(value):lower()=="wild" and "wild" or "starter"
     starterHunter:setMode(jumpMode)
     if jumpMode=="wild" then starterHunter:detectWildArea(true) end
-    targetInfo,actualPokemon=nil,nil
+    targetInfo,actualPokemon,jumpTargetFrame=nil,nil,nil
+    editing,editText,searching=false,"",false
     phase="idle"
     status=(jumpMode=="wild")
         and "Hover over Sweet Scent, choose a shiny target, then press R."
@@ -109,7 +115,10 @@ local function stop(message)
 end
 
 local function arm(value)
-    if value~=nil and not starterHunter:setFrame(value) then status="Invalid target frame."; render(true); return false,status end
+    local requested=value~=nil and value or jumpTargetFrame
+    if requested==nil then status="Press G and enter a target frame first."; render(true); return false,status end
+    if not starterHunter:setFrame(requested) then status="Invalid target frame."; render(true); return false,status end
+    jumpTargetFrame=math.floor(tonumber(requested))
     if jumpMode=="wild" then starterHunter:detectWildArea(false) end
     local ok,info=starterHunter:lockTargetFrame()
     if not ok then status=tostring(info); phase="idle"; render(true); return false,info end
@@ -194,9 +203,31 @@ callbacks:add("reset",function()
     render(true)
 end)
 
-callbacks:add("key",function(event)
+local function handleKey(event)
     if not activeTool() or event.state~=1 or ((event.modifiers or 0)&0xC)~=0 then return end
     local key=event.key
+    if editing then
+        if key>=48 and key<=57 then
+            if #editText<7 then editText=editText..string.char(key) end
+        elseif key==0x08 then
+            editText=editText:sub(1,-2)
+        elseif key==0x0A or key==0x0D or key==0x800050 then
+            local value=tonumber(editText)
+            if value and value>=0 and value<=5000000 and starterHunter:setFrame(value) then
+                jumpTargetFrame=math.floor(value)
+                targetInfo,actualPokemon=nil,nil
+                status=string.format("Target frame %d selected. Press R when the final A action is ready.",jumpTargetFrame)
+            else
+                status="Invalid frame. Enter a value from 0 to 5000000."
+            end
+            editing,editText=false,""
+        elseif key==0x1B then
+            editing,editText=false,""
+            status="Target edit cancelled."
+        end
+        render(true)
+        return
+    end
     if key==0x1B then stop(); return end
     if key<32 or key>126 then render(true); return end
     local c=string.char(key):lower()
@@ -204,15 +235,37 @@ callbacks:add("key",function(event)
     elseif c=="r" then arm()
     elseif c=="f" then
         local hit=starterHunter:getFrameHitState()
-        if starterHunter:findAsyncFrom(math.max(0,hit.currentFrame or 0)) then status="Searching for the next matching shiny frame..." end
+        if starterHunter:findAsyncFrom(math.max(0,hit.currentFrame or 0)) then
+            searching=true
+            status="Searching for the next matching shiny frame..."
+        end
         render(true)
     elseif c=="q" then starterHunter:resetFrameDiagnostics(); status="Calibration cleared."; render(true)
-    elseif c=="g" then render(true) end
-end)
+    elseif c=="g" then
+        editing,editText=true,""
+        status="Type the target RNG frame, then press Enter."
+        render(true)
+    end
+end
+callbacks:add("key",handleKey)
 
 frameClock:add(function()
     if not activeTool() then return end
     frameCounter=frameCounter+1
+    if searching then
+        local runtime=starterHunter:getRuntimeState()
+        if runtime.mode~="searching" then
+            local hit=starterHunter:getFrameHitState()
+            searching=false
+            if hit.targetArmed and hit.targetShiny then
+                jumpTargetFrame=hit.targetFrame
+                status=string.format("Found shiny frame %d. Press R when the final A action is ready.",jumpTargetFrame)
+            else
+                status="No matching shiny frame was found in the search range."
+            end
+            render(true)
+        end
+    end
     if phase=="armed" then
         local ok,info=starterHunter:lockTargetFrame()
         if ok then targetInfo=info else phase="idle"; status=tostring(info) end
@@ -225,12 +278,23 @@ function Jump:setMode(value) return setMode(value) end
 function Jump:arm(value) return arm(value) end
 function Jump:stop(message) return stop(message) end
 function Jump:find(startAt) return starterHunter:findAsyncFrom(startAt) end
-function Jump:setFrame(value) local ok=starterHunter:setFrame(value); render(true); return ok end
+function Jump:setFrame(value)
+    local number=tonumber(value)
+    local ok=number and number>=0 and number<=5000000 and starterHunter:setFrame(number) or false
+    if ok then jumpTargetFrame=math.floor(number) end
+    render(true)
+    return ok
+end
 function Jump:getState() return snapshot() end
 function Jump:testPressA()
         if phase~="armed" then return false end
         starterHunter:lockTargetFrame(); phase="waiting"; status="Test A received."; return true
 end
 function Jump:testTick() return detectResult() end
+function Jump:testKey(key)
+    if not STARTER_HUNTER_ENABLE_TEST_API then return false end
+    handleKey({key=key,state=1,modifiers=0})
+    return true
+end
 
 setMode("starter")
