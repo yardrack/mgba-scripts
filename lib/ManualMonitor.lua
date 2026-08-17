@@ -15,6 +15,15 @@ local suiteDir=STARTER_HUNTER_DIR or (script and script.dir)
 if not suiteDir then error("The manual monitor could not locate the suite folder.") end
 STARTER_HUNTER_DIR=suiteDir
 local frameClock=GEN3_FRAME_CLOCK or dofile(suiteDir.."/lib/FrameClock.lua")
+local gameProfile=dofile(suiteDir.."/lib/GameProfiles.lua").resolve(gameCode,emu:read8(0x080000BC))
+local function captureFrame()
+    -- Gen III increments gMain.vblankCounter2 once in the hardware VBlank
+    -- interrupt. Counter 1 is a pointer in FR/LG, while counter 2 is a direct
+    -- u32 in all five games. Reading it makes paused Ctrl+N stepping exact
+    -- even when mGBA emits several Lua callbacks for one frontend action.
+    return gameProfile and gameProfile.gMain and emu:read32(gameProfile.gMain+0x24)
+        or frameClock:currentFrame()
+end
 STARTER_HUNTER_ENCOUNTER_DATA=dofile(suiteDir.."/lib/encounter_data.lua")
 if not MANUAL_MONITOR_SHOW_RNG_PANELS then STARTER_HUNTER_HIDE_CORE_UI=true end
 STARTER_HUNTER_DIAGNOSTIC=true
@@ -83,7 +92,7 @@ local function snapshot()
     local pokemon=observedPokemon
     return {
         kind=kind,
-        videoFrame=frameClock:currentFrame(),
+        videoFrame=captureFrame(),
         myFrame=state.currentFrame,
         initialSeed=runtime.initialSeed,
         initialSeedBits=runtime.initialSeedBits,
