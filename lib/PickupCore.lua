@@ -332,6 +332,7 @@ local function render(force)
     local levelText=minLevel and (minLevel==maxLevel and ("Lv"..minLevel) or ("Lv"..minLevel.."-"..maxLevel)) or "no Pickup mon"
     local lines={"PICKUP | Emerald  |  "..(enabled and battle.active and "RUNNING" or "READY"),
         string.format("Party: %d Pickup   Wins: %d   Collected: %d",count,battle.battlesWon or 0,totalItems),
+        string.format("Self-recoveries: %d   Trigger: HP <= %d%% or PP <= %d",battle.selfRecoveries or 0,battle.healPercent or 20,battle.ppRecoverThreshold or 3),
         bag.ready and string.format("Bag: %d items (%d/%d slots)",bag.totalQuantity,bag.usedSlots,bag.totalSlots) or "Bag: unavailable",
         string.format("Keep: %s   Discarded: %d",filter:name(),discardedItems),
         string.format("PC deposits: %d stacks / %d items",depositedSlots,depositedQuantity),
@@ -376,7 +377,7 @@ local function start()
         enabled=false
         status=Battle:getState().status
     else
-        status=string.format("Running with %d Pickup Pokemon. Zigzagoon/Linoone battles and self-heals at 20%% HP.",#mons)
+        status=string.format("Running with %d Pickup Pokemon. Self-recovers HP/status/PP at 20%% HP or 3 PP.",#mons)
     end
     render(true)
 end
@@ -418,9 +419,11 @@ end
 function Pickup:getState()
     local _,count=partyLines()
     local possible=possibleItems()
+    local battle=Battle and Battle:getState() or {}
     return {enabled=enabled,status=status,totalItems=totalItems,lastItem=lastItem,pickupCount=count,itemCounts=itemCounts,
         possibleItems=possible,depositedSlots=depositedSlots,depositedQuantity=depositedQuantity,
-        filter=filter:name(),discardedItems=discardedItems,session=stats:snapshot("Pickup")}
+        filter=filter:name(),discardedItems=discardedItems,selfRecoveries=battle.selfRecoveries or 0,
+        ppRecoverThreshold=battle.ppRecoverThreshold or 3,session=stats:snapshot("Pickup")}
 end
 function Pickup:start() start(); return enabled end
 function Pickup:stop() stop(); return true end

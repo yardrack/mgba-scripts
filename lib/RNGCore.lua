@@ -152,6 +152,30 @@ local readPokemon -- used by diagnostic search before the reader's definition
 local function clearShinyTargets()
     shinyTargets, shinyTargetIndex = {}, 0
     eonBridge.frameChoiceConfirmed=false
+    eonBridge.targetSeed=nil
+    eonBridge.targetWasScanned=false
+end
+
+function eonBridge.invalidateTarget(reason)
+    local shouldRescan=eonBridge.manualTargetArmed or eonBridge.targetWasScanned or searchJob~=nil
+    target=nil
+    searchJob=nil
+    if mode=="searching" then mode="idle" end
+    clearShinyTargets()
+    lastFrameResult=nil
+    hitCorrectionFrames=0
+    eonBridge.correctionTargetPid=nil
+    eonBridge.resolveJob,eonBridge.pidRecoveryJob=nil,nil
+    eonBridge.manualTargetArmed=false
+    eonBridge.pendingSeedRescan=shouldRescan
+    status=shouldRescan and ((reason or "Target context changed.").." Rescanning shiny frames...")
+        or (reason or "Target context changed.")
+end
+
+function eonBridge.invalidateSeedTarget(newSeed,reason)
+    newSeed=(newSeed or 0)&0xFFFFFFFF
+    baseSeed=newSeed
+    eonBridge.invalidateTarget(string.format("%s Live seed is %08X.",reason or "Seed changed.",newSeed))
 end
 
 local function timerValueText(frames)
@@ -274,7 +298,11 @@ local function readProfile()
         if best then newTid,newSid=best&0xFFFF,(best>>16)&0xFFFF end
     end
     if newTid==nil or newSid==nil then return false end
+    local trainerChanged=tid~=nil and sid~=nil and (newTid~=tid or newSid~=sid)
     tid, sid = newTid, newSid
+    if trainerChanged then
+        eonBridge.invalidateTarget(string.format("Trainer IDs changed to %05d / %05d.",tid,sid))
+    end
     return true
 end
 
@@ -418,7 +446,7 @@ local function staticTarget(frame, startState, targetHuntType, scanOnly)
     state = lcgNext(state); local iv2 = state >> 16
     if (targetHuntType or huntType) == 2 and game.buggedRoamer then iv1, iv2 = iv1 & 0xFF, 0 end
     return {frame=frame,state=startState,lockSeed=lcgPrevious(startState),pid=pid,ivs=unpackIvs(iv1,iv2),
-        nature=NATURES[(pid % 25)+1],shinyValue=sv}
+        nature=NATURES[(pid % 25)+1],shinyValue=sv,trainerTid=tid,trainerSid=sid}
 end
 
 local function hSlot(value, encounterType)
@@ -487,7 +515,7 @@ local function wildTarget(frame, startState, methodOverride, encounterContext, s
     state = lcgNext(state); local iv2 = state >> 16
     return {frame=frame,state=startState,lockSeed=lcgPrevious(startState),pid=pid,ivs=unpackIvs(iv1,iv2),
         nature=NATURES[nature+1],shinyValue=sv,species=slot.species,slot=slotIndex-1,level=level,
-        speciesMatch=slot.species==wanted}
+        speciesMatch=slot.species==wanted,trainerTid=tid,trainerSid=sid}
 end
 
 function eonBridge.makeTargetFor(targetHuntType, frame, startState, methodOverride, encounterContext, scanOnly)
@@ -512,6 +540,7 @@ local function evaluateTarget()
         eonBridge.correctionTargetPid=evaluatedPid
     end
     target=evaluated
+    eonBridge.targetSeed=evaluated and baseSeed or nil
 end
 
 local function checkpointPath()
@@ -812,6 +841,7 @@ local function findNextShiny(startFrame,endFrame)
         if candidate and candidate.shinyValue<8 and (huntType~=3 or candidate.speciesMatch) then
             targetFrame,target=frame,candidate
             shinyTargets,shinyTargetIndex={candidate},1
+            eonBridge.targetSeed,eonBridge.targetWasScanned=baseSeed,true
             status=string.format("Found shiny %s on frame %d.",selectedPokemon(),frame)
             saveSettings(); render(true); return candidate
         end
@@ -828,6 +858,7 @@ local function chooseShinyTarget(index,quiet)
     shinyTargetIndex=((index-1)%#shinyTargets)+1
     target=shinyTargets[shinyTargetIndex]
     targetFrame=target.frame
+    eonBridge.targetSeed=target.originSeed or baseSeed
     eonBridge.frameChoiceConfirmed=true
     status=string.format("Selected option %d/%d: frame %d for shiny %s.",shinyTargetIndex,#shinyTargets,targetFrame,selectedPokemon())
     saveSettings(); render(true); return true
@@ -841,6 +872,7 @@ local function finishShinySearch(message)
         render(true); return
     end
     shinyTargetIndex=1; target=shinyTargets[1]; targetFrame=target.frame
+    eonBridge.targetSeed,eonBridge.targetWasScanned=target.originSeed or baseSeed,true
     eonBridge.manualTargetArmed=true
     if (huntType==1 and STARTER_HUNTER_AUTOMATIC_STARTER) or (huntType==3 and STARTER_HUNTER_AUTOMATIC_WILD) then
         eonBridge.frameChoiceConfirmed=true
@@ -856,6 +888,7 @@ local function finishShinySearch(message)
 end
 
 local function startShinySearch(startAt)
+    eonBridge.pendingSeedRescan=false
     -- Reuse a profile already read from the live save. Some frontends expose
     -- the save pointer only after their frame callback finishes; forcing a
     -- second immediate pointer read could fail even though TID/SID were just
@@ -863,6 +896,25 @@ local function startShinySearch(startAt)
     if (tid==nil or sid==nil) and not readProfile() then
         status="Waiting for TID/SID from live game state."; render(true); return false
     end
+    -- Resolve the search origin from live memory for every supported game.
+    -- Emerald has a fixed zero origin and a direct advances counter; R/S use
+    -- the current RNG state as session frame zero; FR/LG expose their Timer1
+    -- boot seed separately. This prevents settings from an older boot/session
+    -- from contaminating a new scan.
+    if game.initialSeed then
+        local initial=(game.initialSeedBits==16 and emu:read16(game.initialSeed) or emu:read32(game.initialSeed))&0xFFFFFFFF
+        local current=emu:read32(game.seed)&0xFFFFFFFF
+        if initial~=baseSeed then eonBridge.invalidateSeedTarget(initial,"Boot seed changed.") end
+        local absolute=eonBridge.seedDistance(baseSeed,current)
+        liveAdvances=absolute and absolute<=MAX_SEARCH_FRAME and absolute or 0
+        previousSeed=current
+    elseif game.sessionSeed and not previousSeed then
+        local current=emu:read32(game.seed)&0xFFFFFFFF
+        baseSeed,liveAdvances,previousSeed=current,0,current
+    elseif game.advances then
+        baseSeed,liveAdvances=0,emu:read32(game.advances)
+    end
+    eonBridge.pendingSeedRescan=false
     if huntType==3 and not STARTER_HUNTER_TEST_KEEP_WILD_AREA then syncCurrentWildArea(false,false) end
     if huntType==3 and STARTER_HUNTER_AUTOMATIC_WILD then
         local ready,problem=eonBridge.wildPreflight()
@@ -893,11 +945,16 @@ local function startShinySearch(startAt)
         eonBridge.resolveJob,eonBridge.pidRecoveryJob=nil,nil
         local current=readPokemon(game.enemy)
         eonBridge.frameHitEnemyPid=current and current.valid and current.pid or 0
-        eonBridge.frameHitStatus="Searching for the next matching shiny frame..."
+        eonBridge.frameHitStatus=huntType==3
+            and "Searching for the next matching shiny frame..."
+            or "Searching from frame 0 for the smallest shiny frame..."
     end
     if game.advances then liveAdvances=emu:read32(game.advances) end
     local supplied=tonumber(startAt)
-    searchOriginFrame=math.max(0,math.floor(supplied or liveAdvances))
+    -- Static targets are useful after a reset, so their default scan starts at
+    -- the seed's absolute frame zero. Wild targets remain forward-only from
+    -- the live state because an encounter in the past cannot be selected.
+    searchOriginFrame=math.max(0,math.floor(supplied or (huntType==3 and liveAdvances or 0)))
     local encounterContext=huntType==3 and {area=selectedArea(),wanted=selectedWildSpecies()} or nil
     clearShinyTargets(); target=nil; eonBridge.targetPokemonConfirmed=true
     eonBridge.autoStartHunt=false
@@ -910,9 +967,11 @@ local function startShinySearch(startAt)
         mode="searching"
         status=string.format("Scanning forward from current seed %08X...",currentSeed)
     else
-        local first=math.min(MAX_SEARCH_FRAME,supplied and searchOriginFrame or (searchOriginFrame+SEARCH_LEAD_FRAMES))
+        local first=math.min(MAX_SEARCH_FRAME,supplied and searchOriginFrame or 0)
         searchJob={frame=first,last=MAX_SEARCH_FRAME,state=advanceSeed(baseSeed,first),encounterContext=encounterContext}
-        mode="searching"; status=string.format("Searching forward from advance %d...",searchOriginFrame)
+        mode="searching"
+        status=supplied and string.format("Searching forward from advance %d...",searchOriginFrame)
+            or "Searching from frame 0 for the smallest shiny frame..."
     end
     render(true); return true
 end
@@ -920,7 +979,7 @@ end
 local function processShinySearch()
     if not searchJob then return end
     local sliceStarted=os.clock()
-    for work=1,500 do
+    for work=1,256 do
         local candidate=eonBridge.makeTargetFor(huntType,searchJob.frame,searchJob.state,nil,searchJob.encounterContext,true)
         if candidate and candidate.shinyValue<8 and (huntType~=3 or candidate.speciesMatch) then
             if searchJob.liveSeed then
@@ -931,7 +990,7 @@ local function processShinySearch()
             shinyTargets[#shinyTargets+1]=candidate
             local automatic=(huntType==1 and STARTER_HUNTER_AUTOMATIC_STARTER)
                 or (huntType==3 and STARTER_HUNTER_AUTOMATIC_WILD)
-            local required=automatic and 1 or SHINY_FRAME_CHOICES
+            local required=(automatic or STARTER_HUNTER_CAPTURE_ONLY) and 1 or SHINY_FRAME_CHOICES
             status=string.format("Found %d/%d shiny frame%s...",#shinyTargets,required,required==1 and "" or " options")
             if #shinyTargets>=required then finishShinySearch(); return end
         end
@@ -942,7 +1001,7 @@ local function processShinySearch()
         -- Yield back to mGBA frequently. A large synchronous search slice can
         -- otherwise starve Windows input and make the Scripting window look
         -- hung, especially with unbounded fast-forward enabled.
-        if work%16==0 and os.clock()-sliceStarted>=0.002 then return end
+        if work%16==0 and os.clock()-sliceStarted>=0.001 then return end
     end
 end
 
@@ -1264,6 +1323,7 @@ local function beginHunt()
     if not (huntType==3 and target and target.liveSeed) then evaluateTarget() end
     if not target or target.shinyValue>=8 or (huntType==3 and not target.speciesMatch) then status="Press F to choose a matching shiny frame first."; render(true); return false end
     automationTarget,automationHuntType,automationPokemon,automationTid,automationSid=target,huntType,selectedPokemon(),tid,sid
+    eonBridge.verifiedPokemon=nil
     seedCandidates={target.lockSeed}; seedAttempt=1
     wrongResults={}; wildSeedLocked,wildTaskSeen=false,false; wildLockDiagnostics=nil
     if (huntType==1 or huntType==2 or (huntType==3 and usesAutomaticSweetScent())) and not armWildBreakpoint() then
@@ -1310,13 +1370,18 @@ local function verifyGeneric()
         if count>initialPartyCount then
             local pokemon=readPokemon(game.party+(count-1)*0x64)
             if not pokemon.valid then return false,nil end
-            if pokemon.pid==automationTarget.pid and shinyValue(automationTid,automationSid,pokemon.pid)<8 then saveSuccess(automationPokemon); return true end
+            local speciesOk=eonBridge.internalSpeciesName(pokemon.species)==automationPokemon
+            if pokemon.pid==automationTarget.pid and shinyValue(automationTid,automationSid,pokemon.pid)<8 then
+                if not speciesOk then return false,"wrong_species",pokemon end
+                eonBridge.verifiedPokemon=pokemon
+                saveSuccess(automationPokemon); return true
+            end
             return false,"wrong",pokemon
         end
     elseif automationHuntType==2 then
         local matched,roamer=eonBridge.roamer:matches(roamerIndex,automationTarget.pid,automationTid,automationSid)
         if roamer and roamer.active then
-            if matched then saveSuccess(automationPokemon); return true end
+            if matched then eonBridge.verifiedPokemon=roamer; saveSuccess(automationPokemon); return true end
             return false,"wrong",roamer
         end
     else
@@ -1326,6 +1391,7 @@ local function verifyGeneric()
             local speciesOk=not STARTER_HUNTER_STRICT_WILD_SPECIES or pokemon.species==nationalToInternalSpecies(automationTarget.species)
             if pokemon.pid==automationTarget.pid and shinyValue(automationTid,automationSid,pokemon.pid)<8 then
                 if not speciesOk then return false,"wrong_species",pokemon end
+                eonBridge.verifiedPokemon=pokemon
                 saveSuccess(automationPokemon); return true
             end
             return false,"wrong",pokemon
@@ -1803,16 +1869,16 @@ local function runNavigation()
             -- R/S profile saves face Birch's bag. Open it, then move the
             -- three-ball cursor (Treecko left, Torchic centre, Mudkip right).
             if stageFrames==15 then pressKey(KEY_A)
-            elseif stageFrames==75 and starterIndex==1 then pressKey(KEY_LEFT)
-            elseif stageFrames==75 and starterIndex==3 then pressKey(KEY_RIGHT)
+            elseif stageFrames>=72 and stageFrames<=76 and starterIndex==1 then pressKey(KEY_LEFT)
+            elseif stageFrames>=72 and stageFrames<=76 and starterIndex==3 then pressKey(KEY_RIGHT)
             elseif step>=105 then navStage,stageFrames="generic_ready",0; prepareTargetCountdown() end
         else
             -- FR/LG fixture starts below the middle ball. The physical order
             -- is Bulbasaur, Squirtle, Charmander while the API order is
             -- Bulbasaur, Charmander, Squirtle.
-            if step==10 and starterIndex==1 then pressKey(KEY_LEFT)
-            elseif step==10 and starterIndex==2 then pressKey(KEY_RIGHT)
-            elseif step==24 then pressKey(KEY_UP)
+            if step>=8 and step<=12 and starterIndex==1 then pressKey(KEY_LEFT)
+            elseif step>=8 and step<=12 and starterIndex==2 then pressKey(KEY_RIGHT)
+            elseif step>=22 and step<=26 then pressKey(KEY_UP)
             elseif step>=36 then navStage,stageFrames="generic_ready",0; prepareTargetCountdown() end
         end
         return
@@ -1890,6 +1956,11 @@ local function runNavigation()
     end
     if navStage=="generic_lock" then
         local ok,result,actual=verifyGeneric(); if ok then return end
+        if result=="wrong_species" then
+            stopWithError(string.format("Stopped safely: expected %s, but %s appeared.",
+                automationPokemon or "the selected starter",actual and actual.speciesName or "another Pokemon"))
+            return
+        end
         if result=="wrong" then stopOnWrongResult(actual); return end
         if automationHuntType==3 and usesAutomaticSweetScent() and wildBreakpointId then
             -- Press the highlighted field move once. The CreateMon hook below
@@ -1984,7 +2055,8 @@ local function commitEdit()
     if editMode=="seed" then value=tonumber(editText,16); if value then baseSeed=value&0xFFFFFFFF; target=nil; clearShinyTargets(); status="Seed saved. Press F to search." end
     elseif editMode=="frame" then value=tonumber(editText); if value and value>=0 and value<=MAX_SEARCH_FRAME then
         local previousFrame=eonBridge.manualTargetArmed and targetFrame or nil
-        targetFrame=math.floor(value); clearShinyTargets(); evaluateTarget(); eonBridge.manualTargetArmed=true
+        targetFrame=math.floor(value); clearShinyTargets(); eonBridge.targetWasScanned=false; eonBridge.pendingSeedRescan=false
+        evaluateTarget(); eonBridge.manualTargetArmed=true
         if STARTER_HUNTER_DIAGNOSTIC then
             -- Keep calibration when G is used to review/re-enter the same shiny
             -- target. A genuinely different target gets a clean calibration;
@@ -1996,7 +2068,12 @@ local function commitEdit()
             eonBridge.frameHitStatus=previousFrame==targetFrame
                 and "Target kept. The existing correction is still active."
                 or "Target changed. Start a new encounter; calibration will begin from this frame."
-            status=previousFrame==targetFrame and "Target saved; correction kept." or "New target saved with fresh calibration."
+            if target and target.shinyValue>=8 then
+                status=string.format("Frame %d is NOT SHINY for live seed %04X. Press F to find a valid live-seed target.",targetFrame,baseSeed&0xFFFF)
+                eonBridge.frameHitStatus=status
+            else
+                status=previousFrame==targetFrame and "Target saved; correction kept." or "New target saved with fresh calibration."
+            end
         else status="Frame saved." end
     else value=nil end
     elseif editMode=="pre-timer" then value=tonumber(editText); if value and value>=0 and value<=60 then preTimerSeconds=value; status="Timer saved." else value=nil end
@@ -2105,10 +2182,10 @@ local function onKey(event)
     if event.state~=1 then return end
     if ((event.modifiers or 0)&0xC)~=0 then return end
     local key=event.key
-    if STARTER_HUNTER_CAPTURE_ONLY and not editMode and key~=71 and key~=103 then return end
+    if STARTER_HUNTER_CAPTURE_ONLY and not editMode and key~=70 and key~=102 and key~=71 and key~=103 then return end
     if GEN3_SUITE_ACTIVE_TOOL then
         if GEN3_SUITE_ACTIVE_TOOL~="Capture" and GEN3_SUITE_ACTIVE_TOOL~="RNG" then return end
-        if GEN3_SUITE_ACTIVE_TOOL=="Capture" and not editMode and key~=KEY_ESCAPE and key~=71 and key~=103 then return end
+        if GEN3_SUITE_ACTIVE_TOOL=="Capture" and not editMode and key~=KEY_ESCAPE and key~=70 and key~=102 and key~=71 and key~=103 then return end
     end
     if editMode then
         if key==KEY_ENTER or key==KEY_KP_ENTER then commitEdit(); return end
@@ -2232,8 +2309,8 @@ local function updateSessionAdvances()
             if absolute and absolute<=MAX_SEARCH_FRAME then
                 liveAdvances=absolute
             else
-                baseSeed,liveAdvances=current,0
-                target=nil; clearShinyTargets()
+                eonBridge.invalidateSeedTarget(current,"RNG session restarted.")
+                liveAdvances=0
             end
         else
             local absolute=eonBridge.seedDistance(baseSeed,current)
@@ -2244,7 +2321,7 @@ local function updateSessionAdvances()
             -- Ruby/Sapphire do not retain a separate initial seed. Frame zero
             -- is the live RNG state when Capture begins.
             baseSeed,liveAdvances=current,0
-            target=nil; clearShinyTargets()
+            target,eonBridge.targetSeed=nil,nil; eonBridge.targetWasScanned=false; clearShinyTargets()
         else
             local absolute=eonBridge.seedDistance(baseSeed,current)
             liveAdvances=absolute and absolute<=MAX_SEARCH_FRAME and absolute or 0
@@ -2267,6 +2344,10 @@ local function onFrame()
     eonBridge.processPidRecovery()
     processGameHotkeys()
     if (STARTER_HUNTER_DIAGNOSTIC and frameCounter%6==0) or frameCounter%30==0 then updateSessionAdvances() end
+    if eonBridge.pendingSeedRescan and (mode=="idle" or mode=="error" or mode=="success") then
+        eonBridge.pendingSeedRescan=false
+        startShinySearch()
+    end
     if eonBridge.resolveJob then eonBridge.processResolve() end
     -- PID detection does not need a 60 Hz checksum scan. Eight-frame polling is
     -- still quick enough to catch the new party/enemy slot and removes almost
@@ -2387,8 +2468,8 @@ function starterHunter:setPreTimer(value)
     local n=tonumber(value); if not n or n<0 or n>60 then return false end
     preTimerSeconds=n; saveSettings(); render(true); return true
 end
-function starterHunter:setSeed(value) local n=type(value)=="number" and value or tonumber(tostring(value),16); if not n then return false end; baseSeed=n&0xFFFFFFFF; target=nil; clearShinyTargets(); saveSettings(); render(true); return true end
-function starterHunter:setFrame(value) local n=tonumber(value); if not n or n<0 or n>MAX_SEARCH_FRAME then return false end; targetFrame=math.floor(n); clearShinyTargets(); evaluateTarget(); eonBridge.manualTargetArmed=true; saveSettings(); render(true); return true end
+function starterHunter:setSeed(value) local n=type(value)=="number" and value or tonumber(tostring(value),16); if not n then return false end; baseSeed=n&0xFFFFFFFF; target,eonBridge.targetSeed=nil,nil; eonBridge.targetWasScanned=false; clearShinyTargets(); saveSettings(); render(true); return true end
+function starterHunter:setFrame(value) local n=tonumber(value); if not n or n<0 or n>MAX_SEARCH_FRAME then return false end; targetFrame=math.floor(n); clearShinyTargets(); eonBridge.targetWasScanned=false; eonBridge.pendingSeedRescan=false; evaluateTarget(); eonBridge.manualTargetArmed=true; saveSettings(); render(true); return true end
 function starterHunter:findNext(a,b) return findNextShiny(a,b) end
 function starterHunter:findAsync() return startShinySearch() end
 function starterHunter:findAsyncFrom(value) return startShinySearch(value) end
@@ -2467,17 +2548,15 @@ function starterHunter:getSeedState()
     local current=emu:read32(game.seed)&0xFFFFFFFF
     if game.sessionSeed and not previousSeed then
         baseSeed,initial,liveAdvances,previousSeed=current,current,0,current
-        target=nil; clearShinyTargets()
+        target,eonBridge.targetSeed=nil,nil; eonBridge.targetWasScanned=false; clearShinyTargets()
     elseif game.initialSeed then
         initial=game.initialSeedBits==16 and emu:read16(game.initialSeed) or emu:read32(game.initialSeed)
         initial=initial&0xFFFFFFFF
         if initial~=baseSeed then
-            baseSeed=initial
+            eonBridge.invalidateSeedTarget(initial,"Boot seed changed.")
             local absolute=eonBridge.seedDistance(baseSeed,current)
             liveAdvances=absolute and absolute<=MAX_SEARCH_FRAME and absolute or 0
             previousSeed=current
-            target=nil
-            clearShinyTargets()
         end
     end
     return {initialSeed=initial&0xFFFFFFFF,initialSeedBits=game.initialSeedBits or 32,
@@ -2496,10 +2575,11 @@ function starterHunter:getRuntimeState()
         initialSeed=seeds.initialSeed,initialSeedBits=seeds.initialSeedBits,currentSeed=seeds.currentSeed,
         automaticWild=STARTER_HUNTER_AUTOMATIC_WILD==true,automaticStarter=STARTER_HUNTER_AUTOMATIC_STARTER==true,
         autoStartPending=eonBridge.autoStartHunt==true,
-        targetOriginSeed=(automationTarget or target) and (automationTarget or target).originSeed or nil,
+        targetOriginSeed=(automationTarget or target) and ((automationTarget or target).originSeed or eonBridge.targetSeed) or nil,
         catchState=eonBridge.catch.state,
         catchStatus=eonBridge.catch.status,catchAttempts=eonBridge.catch.attempts,
-        searchFrame=searchJob and searchJob.frame or nil}
+        searchFrame=searchJob and searchJob.frame or nil,
+        verifiedPokemon=eonBridge.verifiedPokemon}
 end
 function starterHunter:testEnsurePokeBalls()
     return eonBridge.catch:testInjectBall(2,99)
@@ -2591,6 +2671,10 @@ function starterHunter:getFrameHitState()
     -- FireRed and LeafGreen choose a new Timer1 seed during boot. Synchronise
     -- the resolver before reporting advances or resolving a received starter.
     starterHunter:getSeedState()
+    -- SaveBlock2 can become readable after a temporary party-OT fallback was
+    -- used. Refresh identity here so a target from another TID/SID can never
+    -- remain labelled shiny or be accepted as the current player's target.
+    readProfile()
     -- Emerald exposes a direct counter, so refreshing it here is cheap. Other
     -- games use the incremental tracker maintained by the frame callback.
     if game.advances then liveAdvances=emu:read32(game.advances) end

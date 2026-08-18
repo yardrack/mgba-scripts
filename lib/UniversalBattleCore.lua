@@ -50,6 +50,9 @@ local frames,inputMask,battles,items=0,0,0,0
 local itemCounts,lastItem={},"None yet"
 local depositedSlots,depositedQuantity=0,0
 local discardedItems=0
+local selfRecoveries=0
+local pickupHealPercent=20
+local ppRecoverThreshold=math.max(0,math.floor(tonumber(PICKUP_PP_RECOVERY_THRESHOLD) or 3))
 local filter=PickupFilter.new(PICKUP_FILTER_MODE or "All")
 local wasInBattle=false
 local lastBattleText,lastPickupText="",""
@@ -229,6 +232,27 @@ local function healParty()
             rewrite(core,words)
         end
     end
+    return partyCount()>0
+end
+local function partyPp(core)
+    if not core then return 0 end
+    local words=decrypted(core)
+    local ppWord=words[core.order[2]*3+2]
+    local total=0
+    for index,id in ipairs(core.moves) do
+        if id~=0 then total=total+((ppWord>>((index-1)*8))&0xFF) end
+    end
+    return total
+end
+local function pickupRecoveryNeeded()
+    local lead=monCore(0)
+    if not lead then return "party unavailable" end
+    if lead.maxHp==0 or lead.hp*100<=lead.maxHp*pickupHealPercent then
+        return string.format("HP low (%d/%d)",lead.hp,lead.maxHp)
+    end
+    local pp=partyPp(lead)
+    if pp<=ppRecoverThreshold then return string.format("move PP low (%d remaining)",pp) end
+    return nil
 end
 local function swapParty(first,second)
     if first==second then return end
@@ -248,6 +272,14 @@ local function chooseLead()
         if eligible and (not best or core.level<best.level) then best=core end
     end
     if best and best.slot~=0 then swapParty(0,best.slot) end
+end
+local function selfRecover(reason)
+    if not healParty() then return false end
+    selfRecoveries=selfRecoveries+1
+    chooseLead()
+    prepareBestMove()
+    pickupStatus=string.format("Self-recovered HP, status, and PP because %s. Farming resumed.",reason or "recovery was needed")
+    return true
 end
 local function bagKey()
     if not game.bagKeyOffset then return 0 end
@@ -435,7 +467,8 @@ local function render()
     table.sort(picked)
     local pickupLines={
         "PICKUP | "..game.name.."  |  "..(activeKind=="Pickup" and "RUNNING" or "READY"),
-        string.format("Battles: %d   Collected: %d",battles,items),
+        string.format("Battles: %d   Collected: %d   Self-recoveries: %d",battles,items,selfRecoveries),
+        string.format("Recovery trigger: HP <= %d%% or PP <= %d",pickupHealPercent,ppRecoverThreshold),
         bag.ready and string.format("Bag: %d items (%d/%d slots)",bag.totalQuantity,bag.usedSlots,bag.totalSlots) or "Bag: unavailable",
         string.format("Keep: %s   Discarded: %d",filter:name(),discardedItems),
         string.format("PC deposits: %d stacks / %d items",depositedSlots,depositedQuantity),
@@ -459,7 +492,7 @@ local function render()
 end
 local function start(kind)
     inputMask=0; emu:setKeys(0); if emu.clearKeys then emu:clearKeys(0x3FF) end
-    activeKind=kind; frames=0; battles=0; wasInBattle=false
+    activeKind=kind; frames=0; battles=0; selfRecoveries=0; wasInBattle=false
     stats:start(kind,true)
     chooseLead(); healParty(); prepareBestMove()
     if kind=="Pickup" then pickupStatus="Pickup started. Press P to stop."
@@ -507,9 +540,13 @@ frameClock:add(function()
             wasInBattle=false; seenLearnMove=0; battles=battles+1
             stats:inc(activeKind,"battles",1)
             if activeKind=="Pickup" and not collectPickup() then stop("Pickup",pickupStatus); render(); return end
-            healParty(); chooseLead(); prepareBestMove()
-            if activeKind=="Pickup" then pickupStatus="Battle complete. Pickup collected; searching again."
-            else battleStatus="Battle complete. Party healed; searching again." end
+            if activeKind=="Pickup" then
+                local reason=pickupRecoveryNeeded()
+                if reason then selfRecover(reason)
+                else chooseLead(); prepareBestMove(); pickupStatus="Battle complete. Pickup collected; searching again." end
+            else
+                healParty(); chooseLead(); prepareBestMove(); battleStatus="Battle complete. Party healed; searching again."
+            end
         elseif handleMovePrompt() then
             -- Keep resolving the game's normal move-learning dialogue while
             -- the post-battle callback still owns the screen.
@@ -522,7 +559,10 @@ frameClock:add(function()
         end
     else
         local lead=monCore(0)
-        if not lead or lead.hp==0 then healParty(); chooseLead() end
+        if activeKind=="Pickup" then
+            local reason=pickupRecoveryNeeded()
+            if reason then selfRecover(reason) end
+        elseif not lead or lead.hp==0 then healParty(); chooseLead() end
         spinInPlace()
     end
     -- The windowless mGBA runner has no frontend key-poll event. Applying the
@@ -553,7 +593,8 @@ function Pickup:isRunning() return activeKind=="Pickup" end
 function Pickup:getStatus() return pickupStatus end
 function Pickup:getState() return {enabled=activeKind=="Pickup",status=pickupStatus,totalItems=items,lastItem=lastItem,
     itemCounts=itemCounts,depositedSlots=depositedSlots,depositedQuantity=depositedQuantity,
-    filter=filter:name(),discardedItems=discardedItems,session=stats:snapshot("Pickup")} end
+    filter=filter:name(),discardedItems=discardedItems,selfRecoveries=selfRecoveries,
+    healPercent=pickupHealPercent,ppRecoverThreshold=ppRecoverThreshold,session=stats:snapshot("Pickup")} end
 function Pickup:clearTotals() items,itemCounts,lastItem,depositedSlots,depositedQuantity,discardedItems=0,{},"None yet",0,0,0; stats:reset("Pickup"); render(); return true end
 function Pickup:setFilter(value)
     local ok,name=filter:set(value)
@@ -564,6 +605,8 @@ end
 function Pickup:cycleFilter() local name=filter:cycle(); pickupStatus="Pickup keep filter: "..name.."."; render(); return name end
 function Pickup:getFilters() return filter:names() end
 function Pickup:testFilterItem(itemId) if not PICKUP_ENABLE_TEST_API then return nil end; return filter:accepts(itemId) end
+function Pickup:testRecoveryNeeded() if not PICKUP_ENABLE_TEST_API then return nil end; return pickupRecoveryNeeded() end
+function Pickup:testSelfRecover(reason) if not PICKUP_ENABLE_TEST_API then return nil end; return selfRecover(reason or "test request") end
 function Pickup:testCollect()
     if not PICKUP_ENABLE_TEST_API then return nil end
     return collectPickup(true)

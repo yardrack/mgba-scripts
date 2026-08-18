@@ -21,11 +21,11 @@ local function rawCaptureFrame()
     -- interrupt. Counter 1 is a pointer in FR/LG, while counter 2 is a direct
     -- u32 in all five games. Reading it makes paused Ctrl+N stepping exact
     -- even when mGBA emits several Lua callbacks for one frontend action.
-    return gameProfile and gameProfile.gMain and emu:read32(gameProfile.gMain+0x24)
-        or frameClock:currentFrame()
+    return gameProfile and gameProfile.gMain and emu:read32(gameProfile.gMain+0x24) or frameClock:currentFrame()
 end
 local captureClock=dofile(suiteDir.."/lib/CaptureClock.lua").new(rawCaptureFrame())
 local function captureFrame() return captureClock:value() end
+local render
 callbacks:add("key",function(event)
     local key=tonumber(event.key)
     local state=tonumber(event.state)
@@ -35,12 +35,10 @@ callbacks:add("key",function(event)
     local control=tonumber(keyMods.CONTROL) or 0
     if control==0 or (modifiers&control)==0 then return end
     if key==string.byte("N") or key==string.byte("n") then
-        captureClock:frameAdvanceKey(state,inputState.DOWN,inputState.UP)
+        captureClock:frameAdvanceKey(state,inputState.DOWN,inputState.UP,rawCaptureFrame())
+        if state==inputState.DOWN and render then render(true) end
     elseif (key==string.byte("P") or key==string.byte("p")) and state==inputState.DOWN then
-        -- Whether this press pauses or resumes, Ctrl+N will arm suppression
-        -- again when needed. Re-anchoring here also supports scripts loaded
-        -- while mGBA was already paused.
-        captureClock:resume(rawCaptureFrame())
+        captureClock:togglePause(rawCaptureFrame())
     end
 end)
 STARTER_HUNTER_ENCOUNTER_DATA=dofile(suiteDir.."/lib/encounter_data.lua")
@@ -140,10 +138,12 @@ local function snapshot()
     }
 end
 
-local function render(force)
+render=function(force)
     local state=snapshot()
     local mon=state.pokemon
-    local miss=state.miss and string.format("%+d (%s)",state.miss,state.miss==0 and "exact" or (state.miss>0 and "late" or "early")) or "--"
+    local missLabel=state.inputFrame and not state.targetIsShiny and "target NOT SHINY"
+        or (state.miss==0 and "exact" or (state.miss and (state.miss>0 and "late" or "early") or nil))
+    local miss=state.miss and string.format("%+d (%s)",state.miss,missLabel) or "--"
     local ivs=mon and mon.ivs
     local initialSeedFormat=state.initialSeedBits==16 and "%04X" or "%08X"
     local text=table.concat({
@@ -153,7 +153,7 @@ local function render(force)
         "Trainer TID / SID "..(captureTid and captureSid and string.format("%05d / %05d",captureTid,captureSid) or "waiting for live state"),
         string.format("Current Frame     %d",state.videoFrame),
         string.format("Advances          %d",state.myFrame),
-        "Target Frame      "..state.inputText.."  (G edit)",
+        "Target Frame      "..state.inputText.."  (G edit; F live shiny)",
         "Hit Frame         "..(state.landedFrame and tostring(state.landedFrame)
             or (state.waitingFreshStarter and "WAIT RESET" or (state.resolveError and "NO MATCH" or "--"))),
         "Miss              "..miss,
@@ -260,7 +260,7 @@ callbacks:add("key",function(event)
     if event.state~=1 or ((event.modifiers or 0)&0xC)~=0 then return end
     local key=event.key
     if GEN3_SUITE_MANAGED then
-        local suiteKey=key==71 or key==103 or key==77 or key==109 or key==81 or key==113 or
+        local suiteKey=key==70 or key==102 or key==71 or key==103 or key==77 or key==109 or key==81 or key==113 or
             key==73 or key==105 or key==0x0A or key==0x0D or key==0x800050
         if not suiteKey then return end
     end
@@ -296,11 +296,15 @@ end)
 local frameCounter=0
 frameClock:add(function()
     captureClock:update(rawCaptureFrame())
+    local corrected=frameClock.consumeCorrection and frameClock:consumeCorrection() or false
     if GEN3_SUITE_ACTIVE_TOOL and GEN3_SUITE_ACTIVE_TOOL~="Capture" then return end
     frameCounter=frameCounter+1
     if frameCounter%30==0 then refreshTrainerIds() end
     if not STARTER_HUNTER_MANUAL_TEST then
-        if kind=="starter" then pollStarter(false)
+        -- Party decryption/checksum work is unrelated to Current Frame. Poll
+        -- it at 10 Hz while the hardware VBlank counter still updates on every
+        -- callback, keeping fast-forward responsive without missing a starter.
+        if kind=="starter" and frameCounter%6==0 then pollStarter(false)
         elseif frameCounter%6==0 then pollWild(false) end
     end
     -- Normal play uses a wall-clock throttle so the console stays light. In
@@ -308,8 +312,14 @@ frameClock:add(function()
     -- advances enough for a redraw, so force a bounded refresh every 30
     -- callbacks as a fallback. The frame counter and RNG reads keep running
     -- on every callback regardless of how often the panel is painted.
-    if frameCounter%6==0 then
-        local now=os.clock()
+    local now=os.clock()
+    if captureClock:isStepping() or corrected then
+        -- A paused emulator has no later frames available to satisfy the
+        -- normal six-callback UI throttle. Paint this Ctrl+N result now so
+        -- several correctly counted steps never appear as one 4-6 frame jump.
+        render(false)
+        lastRenderClock=now
+    elseif frameCounter%6==0 then
         if now-lastRenderClock>=REFRESH_SECONDS or frameCounter%30==0 then
             render(false)
             lastRenderClock=now

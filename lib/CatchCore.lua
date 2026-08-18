@@ -123,6 +123,20 @@ function Catch:_bagPocket()
     return self.emu:read8(self.game.bagState+self.game.bagPocketOffset)
 end
 function Catch:_captured()
+    if self.expectedPid then
+        local partyCount=math.min(6,self.emu:read8(self.game.partyCount))
+        local stride=self.game.partyStructSize or 100
+        for slot=0,partyCount-1 do
+            if self.emu:read32(self.game.party+slot*stride)==self.expectedPid then return true,"party" end
+        end
+        local base=self:_storageAddress()
+        if validPointer(base) then
+            for slot=0,14*30-1 do
+                if self.emu:read32(base+4+slot*80)==self.expectedPid then return true,"PC" end
+            end
+        end
+        return false
+    end
     if self.emu:read8(self.game.partyCount)>self.initialParty then return true,"party" end
     local count=self:storageCount()
     if count and self.initialStorage and count>self.initialStorage then return true,"PC" end

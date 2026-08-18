@@ -36,6 +36,7 @@ panel:setSize(54,11)
 local active=false
 local grindMode="Lead"
 local healPercent=30
+local ppRecoverThreshold=math.max(0,math.floor(tonumber(PICKUP_PP_RECOVERY_THRESHOLD) or 3))
 local state="idle"
 local status="Stand on an encounter tile, then press B."
 local inputMask,keyPolls,frames=0,0,0
@@ -49,6 +50,7 @@ local lastRenderClock=0
 local turns=0
 local testWarpFrames=0
 local emergencyEscape,needsCenter=false,false
+local recoveryReason=nil
 local faintReplacementSlot=nil
 local faintSwitches=0
 local learnDecision,learnMoveId,learnPartySlot=nil,nil,nil
@@ -287,6 +289,16 @@ local function mon(slot)
     local a=GPLAYER_PARTY+slot*PARTY_SIZE
     return {slot=slot,level=emu:read8(a+0x54),hp=emu:read16(a+0x56),maxHp=emu:read16(a+0x58)}
 end
+local function partyPp(slot)
+    local core=partyCore(slot)
+    if not core then return 0 end
+    local ppWord=emu:read32(core.attacks+8)~core.key
+    local total=0
+    for index,id in ipairs(core.moves) do
+        if id~=0 then total=total+((ppWord>>((index-1)*8))&0xFF) end
+    end
+    return total
+end
 local function partySummary()
     local result={}
     for slot=0,partyCount()-1 do
@@ -295,16 +307,20 @@ local function partySummary()
     end
     return #result>0 and table.concat(result,"  |  ") or "No party Pokemon"
 end
-local function shouldHeal()
-    if partyCount()==0 then return true end
-    if grindMode=="Lead" then
-        local p=mon(0); return p.maxHp==0 or p.hp*100<=p.maxHp*healPercent
-    end
-    for slot=0,partyCount()-1 do
+local function shouldRecover()
+    if partyCount()==0 then return true,"party unavailable" end
+    local last=grindMode=="Balanced" and partyCount()-1 or 0
+    for slot=0,last do
         local p=mon(slot)
-        if p.maxHp>0 and p.hp*100<=p.maxHp*healPercent then return true end
+        if p.maxHp==0 or p.hp*100<=p.maxHp*healPercent then
+            return true,string.format("HP low (%d/%d)",p.hp,p.maxHp)
+        end
+        local pp=partyPp(slot)
+        if pp<=ppRecoverThreshold then
+            return true,string.format("move PP low (%d remaining)",pp)
+        end
     end
-    return false
+    return false,nil
 end
 local function partyFullyHealed()
     if partyCount()==0 then return false end
@@ -324,7 +340,7 @@ local function healPartyDirect()
     -- Calling Emerald's HealPlayerParty routine by replacing PC/LR can strand
     -- the emulator in a game callback.  These are the unencrypted party status
     -- fields the routine ultimately restores, so writing them directly is both
-    -- quicker and safe while the overworld callback is active in the Center.
+    -- quicker and safe while the normal overworld callback is active.
     local healed=0
     for slot=0,partyCount()-1 do
         local address=GPLAYER_PARTY+slot*PARTY_SIZE
@@ -609,13 +625,21 @@ local function bestBattleMove()
 end
 local function handleBattleInput()
     local hp,maxHp=emu:read16(BATTLE_MONS+0x28),emu:read16(BATTLE_MONS+0x2C)
-    if maxHp>0 and hp*100<=maxHp*healPercent then
+    local battlePp=0
+    for index=0,3 do
+        if emu:read16(BATTLE_MONS+0x0C+index*2)~=0 then battlePp=battlePp+emu:read8(BATTLE_MONS+0x24+index) end
+    end
+    local lowHp=maxHp>0 and hp*100<=maxHp*healPercent
+    local lowPp=battlePp<=ppRecoverThreshold
+    if lowHp or lowPp then
         needsCenter=true
+        recoveryReason=lowHp and string.format("HP low (%d/%d)",hp,maxHp)
+            or string.format("move PP low (%d remaining)",battlePp)
         if (emu:read32(BATTLE_FLAGS)&(1<<3))==0 then
             emergencyEscape=true
-            status=string.format("HP is %d/%d. Running from this wild battle, then healing.",hp,maxHp)
+            status=recoveryReason..". Running from this wild battle, then self-healing."
         else
-            status="HP is low in a Trainer battle. Finishing it, then healing."
+            status=recoveryReason.." in a Trainer battle. Finishing it, then self-healing."
         end
     end
     if handleMoveLearning() then return end
@@ -666,19 +690,19 @@ local function start()
     active,state,frames,battlesWon,centerTrips,turns=true,"grinding",0,0,0,0
     statsMode=grindMode=="Pickup" and "Pickup" or "Battle"
     stats:start(statsMode,not stats:snapshot(statsMode).active)
-    emergencyEscape,needsCenter,learnDecision,learnMoveId,learnPartySlot=false,false,nil,nil,nil; BATTLE_AUTOMATION_ACTIVE=true
+    emergencyEscape,needsCenter,recoveryReason,learnDecision,learnMoveId,learnPartySlot=false,false,nil,nil,nil,nil; BATTLE_AUTOMATION_ACTIVE=true
     evolutionDecisionKey=nil
     faintReplacementSlot,faintSwitches=nil,0
     balanceLead(); status=string.format("Grinding on map %d:%d, tile %d,%d.",startMapGroup,startMapNum,startX,startY); render(true)
 end
-local function beginHealTrip()
+local function beginHealTrip(reason)
     centerTrips=centerTrips+1
     -- ROM callback warps can leave mGBA stuck after the Center map loads.
     -- Restore the same party fields safely and stay on the remembered tile.
     if not healPartyDirect() then stop("Could not heal the party safely."); return end
     state,frames="grinding",0
     balanceLead()
-    status="Party healed safely. Grinding resumed on the saved tile."
+    status=string.format("Self-recovered HP, status, and PP%s. Grinding resumed on the saved tile.",reason and (" because "..reason) or "")
 end
 local function onKey(event)
     if BATTLE_DISABLE_KEYS then return end
@@ -742,14 +766,17 @@ local function tick()
             end
             balanceLead()
             learnDecision,learnMoveId,learnPartySlot=nil,nil,nil
-            if needsCenter or emergencyEscape or shouldHeal() then
-                emergencyEscape,needsCenter=false,false; beginHealTrip()
+            local recover,reason=shouldRecover()
+            if needsCenter or emergencyEscape or recover then
+                reason=recoveryReason or reason
+                emergencyEscape,needsCenter,recoveryReason=false,false,nil; beginHealTrip(reason)
             else
                 state="grinding"; status="Battle finished. Spinning for the next encounter."
             end
         end
     elseif state=="grinding" then
-        if shouldHeal() then beginHealTrip()
+        local recover,reason=shouldRecover()
+        if recover then beginHealTrip(reason)
         elseif frames%6==1 then
             local objectEventId=emu:read8(GPLAYER_AVATAR+5)
             local facing=objectEventId<16 and emu:read16(GOBJECT_EVENTS+objectEventId*0x24+0x18)&0xF or 0
@@ -798,7 +825,7 @@ function Battle:setMode(value)
     render(true); return true
 end
 function Battle:setHealPercent(value) local n=tonumber(value); if active or (n~=20 and n~=30) then return false end; healPercent=n; render(true); return true end
-function Battle:getState() return {active=active,state=state,status=status,mode=grindMode,healPercent=healPercent,battlesWon=battlesWon,centerTrips=centerTrips,turns=turns,keyPolls=keyPolls,emergencyEscape=emergencyEscape,needsCenter=needsCenter,faintSwitches=faintSwitches,faintReplacementSlot=faintReplacementSlot,lastMoveDecision=lastMoveDecision,lastEvolutionDecision=lastEvolutionDecision,startMapGroup=startMapGroup,startMapNum=startMapNum,startX=startX,startY=startY,session=stats:snapshot(statsMode)} end
+function Battle:getState() return {active=active,state=state,status=status,mode=grindMode,healPercent=healPercent,ppRecoverThreshold=ppRecoverThreshold,battlesWon=battlesWon,centerTrips=centerTrips,selfRecoveries=centerTrips,turns=turns,keyPolls=keyPolls,emergencyEscape=emergencyEscape,needsCenter=needsCenter,recoveryReason=recoveryReason,faintSwitches=faintSwitches,faintReplacementSlot=faintReplacementSlot,lastMoveDecision=lastMoveDecision,lastEvolutionDecision=lastEvolutionDecision,startMapGroup=startMapGroup,startMapNum=startMapNum,startX=startX,startY=startY,session=stats:snapshot(statsMode)} end
 function Battle:testSharePickupExperience() if not BATTLE_TEST_ALLOW_NON_ENCOUNTER then return 0 end; return sharePickupExperience() end
 function Battle:testChooseMove(slot,newMove)
     local decision,detail=chooseMoveReplacement(tonumber(slot) or 0,tonumber(newMove) or 0)
@@ -823,6 +850,10 @@ end
 function Battle:testDirectHeal()
     if not PICKUP_ENABLE_TEST_API then return false end
     return healPartyDirect()
+end
+function Battle:testRecoveryNeeded()
+    if not BATTLE_ENABLE_TEST_API then return nil end
+    return shouldRecover()
 end
 function Battle:testPartyCursorKey(current,target)
     if not BATTLE_TEST_ALLOW_NON_ENCOUNTER then return nil end

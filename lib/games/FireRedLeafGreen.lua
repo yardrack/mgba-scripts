@@ -1,6 +1,10 @@
 local shared={
     family="FRLG",
-    seed=0x03005000,initialSeed=0x02020000,initialSeedBits=16,starterOffset=3,
+    -- PokéFinder's Gen 3 Static "Advances" value points directly at the
+    -- first Method 1 PID call. Keep the displayed/entered frame in that same
+    -- convention; the former hidden +3 made an exact PokéFinder hit generate
+    -- a different PID.
+    seed=0x03005000,initialSeed=0x02020000,initialSeedBits=16,starterOffset=0,
     partyCount=0x02024029,party=0x02024284,enemy=0x0202402C,
     save1Ptr=0x03005008,save2Ptr=0x0300500C,storagePtr=0x03005010,roamerOffset=0x30D0,buggedRoamer=true,
     startMenuCursor=0x020370F4,startMenuCount=0x020370F5,startMenuOrder=0x020370F6,
