@@ -13,12 +13,33 @@ local function copy(value,seen)
     for key,item in pairs(value) do result[copy(key,seen)]=copy(item,seen) end
     return result
 end
+local modernSignatures={
+    BPE={address=0x08067A80,bytes={0x00,0xB5,0x05,0x48,0x35,0xF0,0xAE,0xFE}},
+    AXV={address=0x0803A6C0,bytes={0x00,0xB5,0x05,0x48,0x2E,0xF0,0x5E,0xFE}},
+    AXP={address=0x0803A6C0,bytes={0x00,0xB5,0x05,0x48,0x2E,0xF0,0x60,0xFE}},
+    BPR={address=0x0803D97C,bytes={0x00,0xB5,0x05,0x48,0x30,0xF0,0xCA,0xFE}},
+    BPG={address=0x0803D97C,bytes={0x00,0xB5,0x05,0x48,0x30,0xF0,0xCA,0xFE}},
+}
+
+local function isModernShinyRom(code)
+    local signature=modernSignatures[code]
+    if not signature or not emu or type(emu.read8)~="function" then return false end
+    for offset,expected in ipairs(signature.bytes) do
+        if emu:read8(signature.address+offset-1)~=expected then return false end
+    end
+    return true
+end
+
 local function resolve(code,revision)
     local base=profiles[tostring(code):sub(1,3)]
     if not base then return nil end
     local result=copy(base)
     local override=result.revisionOverrides and result.revisionOverrides[tonumber(revision) or 0]
     if override then for key,value in pairs(override) do result[key]=copy(value) end end
+    if isModernShinyRom(tostring(code):sub(1,3)) and result.modern then
+        for key,value in pairs(result.modern) do result[key]=copy(value) end
+    end
+    result.modern=nil
     result.romRevision=tonumber(revision) or 0
     return result
 end

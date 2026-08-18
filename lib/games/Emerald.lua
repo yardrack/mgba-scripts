@@ -16,6 +16,15 @@ return {BPE={
     activeBattler=0x02024064,battlerPartyIndexes=0x0202406E,chooseMove=0x08057BFC,
     fieldLocked=0x03000F2C,inBattleOffset=0x439,rngCounter=0x020249C0,endScriptedWild=0x080B0B6C,
     replaceMoveTask=0x081C174C,evolutionTask=0x0813E570,partyStructSize=100,battleMonSize=88,speciesInfoSize=28,
+    modern={
+        speciesInfo=0x0832044C,speciesNames=0x08318648,moveNames=0x083197FC,battleMoves=0x0831C918,items=0x08583A20,
+        cb2Overworld=0x08085EB0,cb2Battle=0x0803842C,cb2LoadMap=0x08086020,cb2PartyMenu=0x081B7FB4,
+        wildHeaders=0x08552DC8,wildHeadersByRevision={[0]=0x08552DC8},starterTask=0x08134260,
+        sweetScentTask=0x08159F68,sweetScentEncounter=0x080B55CC,createMon=0x08067B74,
+        chooseAction=0x08057594,chooseMove=0x08057C08,bagMenuCallbacks={0x081AADDC,0x081ABDA8},
+        initRoamer=0x08161D34,endScriptedWild=0x080B0BC0,replaceMoveTask=0x081C179C,
+        evolutionTask=0x0813E5E8,warpIntoMap=0x08084C2C,beginEvolution=0x0813DAB8
+    },
     pcItemsOffset=0x498,pcItemsCapacity=50,pcSplitStacks=true,maxItemId=376,
     bagPockets={
         [1]={name="Items",offset=0x560,capacity=30,stack=99,split=true},

@@ -6,6 +6,8 @@ if code~="BPEE" then return end
 local suiteDir=GEN3_SUITE_DIR or (script and script.dir)
 local frameClock=GEN3_FRAME_CLOCK or dofile(suiteDir.."/lib/FrameClock.lua")
 local stats=GEN3_SESSION_STATS or dofile(suiteDir.."/lib/SessionStats.lua").forGame(emu,"BPEE")
+local gameData=dofile(suiteDir.."/lib/GameProfiles.lua")
+local game=assert(gameData.resolve(code,emu:read8(0x080000BC)),"No Emerald memory profile")
 
 local KEY_A,KEY_B,KEY_UP,KEY_DOWN,KEY_LEFT,KEY_RIGHT=0,1,6,7,5,4
 local GMAIN,GPLAYER_COUNT,GPLAYER_PARTY=0x030022C0,0x020244E9,0x020244EC
@@ -13,18 +15,18 @@ local GPARTY_MENU=0x0203CEC8
 local SENT_POKES_TO_OPPONENT=0x020243FE
 local GOBJECT_EVENTS,GPLAYER_AVATAR=0x02037350,0x02037590
 local SAVE1_PTR,SAVE2_PTR,BATTLE_FLAGS,BATTLE_OUTCOME=0x03005D8C,0x03005D90,0x02022FEC,0x0202433A
-local ENEMY_PARTY,SPECIES_NAMES=0x02024744,0x083185C8
-local CB2_OVERWORLD,CB2_BATTLE,CB2_LOAD_MAP=0x08085E5C,0x08038420,0x08085FCC
-local CB2_PARTY_MENU,CB2_PARTY_MENU_INIT=0x081B01B0,0x081B01E0
-local WARP_DEST,WARP_INTO_MAP=0x020322E4,0x08084BD8
+local ENEMY_PARTY,SPECIES_INFO,SPECIES_NAMES=game.enemy,game.speciesInfo,game.speciesNames
+local CB2_OVERWORLD,CB2_BATTLE,CB2_LOAD_MAP=game.cb2Overworld,game.cb2Battle,game.cb2LoadMap or 0x08085FCC
+local CB2_PARTY_MENU,CB2_PARTY_MENU_INIT=game.cb2PartyMenu or 0x081B01B0,game.cb2PartyMenuInit or 0x081B01E0
+local WARP_DEST,WARP_INTO_MAP=0x020322E4,game.warpIntoMap or 0x08084BD8
 local PARTY_SIZE=0x64
 local BATTLE_MONS,ACTION_CURSOR,MOVE_CURSOR,CONTROLLER_FUNCS=0x02024084,0x020244AC,0x020244B0,0x03005D60
-local CHOOSE_ACTION,CHOOSE_MOVE=0x08057588,0x08057BFC
-local TASKS,TASK_EVOLUTION,TASK_REPLACE_MOVE=0x03005E00,0x0813E570,0x081C174C
+local CHOOSE_ACTION,CHOOSE_MOVE=game.chooseAction,game.chooseMove
+local TASKS,TASK_EVOLUTION,TASK_REPLACE_MOVE=game.tasks,game.evolutionTask,game.replaceMoveTask
 local BATTLE_SCRIPT_PTR,MOVE_TO_LEARN,BATTLE_STRUCT_PTR,SUMMARY_PTR=0x02024214,0x020244E2,0x0202449C,0x0203CF1C
 local ASK_LEARN_MOVE,FINISHED_LEARN_MOVE=0x082DABE3,0x082DAC10
-local BATTLE_MOVES,MOVE_NAMES=0x0831C898,0x0831977C
-local BEGIN_EVOLUTION,AFTER_EVOLUTION_CALLBACK=0x0813DA40,0x030061E8
+local BATTLE_MOVES,MOVE_NAMES=game.battleMoves,game.moveNames
+local BEGIN_EVOLUTION,AFTER_EVOLUTION_CALLBACK=game.beginEvolution or 0x0813DA40,0x030061E8
 
 local panel
 if EMERALD_AUTOMATION_HEADLESS or BATTLE_HIDE_UI then
@@ -129,7 +131,7 @@ local function pokemonCore(address)
     local ivFlags=emu:read32(misc+4)~key
     local species=g0&0xFFFF
     local abilityNum=(ivFlags>>31)&1
-    local ability=emu:read8(0x083203CC+species*28+0x16+abilityNum)
+    local ability=emu:read8(SPECIES_INFO+species*28+0x16+abilityNum)
     return {address=address,pid=pid,ot=ot,key=key,order=order,growth=growth,attacks=attacks,
         species=species,ability=ability,isEgg=((ivFlags>>30)&1)==1,
         moves={a0&0xFFFF,(a0>>16)&0xFFFF,a1&0xFFFF,(a1>>16)&0xFFFF}}
@@ -208,7 +210,7 @@ local function moveScore(id,slot,species,purpose)
     local attack=battle and emu:read16(attacker+2) or emu:read16(address+0x5A)
     local special=battle and emu:read16(attacker+8) or emu:read16(address+0x60)
     local stat=info.type<9 and attack or special
-    local speciesInfo=0x083203CC+(species or 0)*28
+    local speciesInfo=SPECIES_INFO+(species or 0)*28
     local first=battle and emu:read8(attacker+0x21) or emu:read8(speciesInfo+6)
     local second=battle and emu:read8(attacker+0x22) or emu:read8(speciesInfo+7)
     local stab=(first==info.type or second==info.type) and 1.5 or 1
@@ -269,7 +271,7 @@ local function chooseMoveReplacement(slot,newMove)
     return bestSlot-1,string.format("learn %s over %s for the stronger overall set",moveName(newMove),moveName(core.moves[bestSlot]))
 end
 local function speciesHasAbility(species,ability)
-    local address=0x083203CC+(species or 0)*28+0x16
+    local address=SPECIES_INFO+(species or 0)*28+0x16
     return emu:read8(address)==ability or emu:read8(address+1)==ability
 end
 local function shouldAcceptEvolution(slot,preSpecies,postSpecies)

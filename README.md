@@ -32,6 +32,8 @@ The launcher validates the ROM header and normalizes the reported game code befo
 
 Only English retail compatible ROM layouts are supported because localized releases relocate save blocks and task structures alongside callback functions plus encounter tables and species metadata enough to produce plausible but technically incorrect diagnostics.
 
+The rebuilt shiny-odds ROMs in `Documents/pokemon-roms` are also supported. The suite identifies their `GetShinyOdds` signature at runtime and switches to the matching symbol-derived maps, while unchanged retail ROMs continue using the original revision maps.
+
 ## Install
 
 1. Download or clone the repository while preserving the root launchers, `assets` directory, and `lib` hierarchy exactly, because the scripts resolve shared modules relative to the selected launcher's filesystem location.

@@ -16,9 +16,9 @@ local gameData=dofile(suiteDir.."/lib/GameProfiles.lua")
 local game=assert(gameData.resolve(code,emu:read8(0x080000BC)),"No Emerald memory profile")
 local stats=GEN3_SESSION_STATS or dofile(suiteDir.."/lib/SessionStats.lua").forGame(emu,"BPEE")
 
-local PARTY_COUNT,PARTY=0x020244E9,0x020244EC
-local SAVE1_PTR,SAVE2_PTR=0x03005D8C,0x03005D90
-local PARTY_SIZE,SPECIES_INFO,SPECIES_NAMES,ITEMS=0x64,0x083203CC,0x083185C8,0x085839A0
+local PARTY_COUNT,PARTY=game.partyCount,game.party
+local SAVE1_PTR,SAVE2_PTR=game.save1Ptr,game.save2Ptr
+local PARTY_SIZE,SPECIES_INFO,SPECIES_NAMES,ITEMS=0x64,game.speciesInfo,game.speciesNames,game.items
 local ABILITY_PICKUP=53
 
 local panel
