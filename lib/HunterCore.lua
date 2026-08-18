@@ -38,6 +38,7 @@ local frames,inputMask=0,0
 local encounters,fled=0,0
 local encounterPid=nil
 local runAttempts=0
+local lastRenderClock=0
 local lastRunFrame=-1000
 local wasInBattle=false
 local pendingFacing,pendingKey,pendingFrames=nil,nil,0
@@ -189,7 +190,9 @@ local function handleBattle()
 end
 
 local function render(force)
-    if not force and frames%15~=0 then return end
+    local now=os.clock()
+    if not force and (frames%15~=0 or now-lastRenderClock<0.25) then return end
+    lastRenderClock=now
     local text=table.concat({
         "HUNTER | "..game.name.." | "..(active and "RUNNING" or "READY"),
         string.format("Encounters: %d   Fled: %d",encounters,fled),
@@ -206,7 +209,7 @@ end
 local function tick()
     frames=frames+1
     inputMask=0
-    if not active then render(false); return end
+    if not active then return end
 
     if inBattle() then
         handleBattle()

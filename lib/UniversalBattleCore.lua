@@ -56,6 +56,7 @@ local ppRecoverThreshold=math.max(0,math.floor(tonumber(PICKUP_PP_RECOVERY_THRES
 local filter=PickupFilter.new(PICKUP_FILTER_MODE or "All")
 local wasInBattle=false
 local lastBattleText,lastPickupText="",""
+local lastRenderClock=0
 local seenLearnMove=0
 local lastMoveDecision="Move learning: waiting."
 local shinyPid=nil
@@ -452,8 +453,10 @@ local function wrappedLines(label,entries,width)
     lines[#lines+1]=current==label and (label.."none") or current
     return lines
 end
-local function render()
-    if frames%15~=0 then return end
+local function render(force)
+    local now=os.clock()
+    if not force and now-lastRenderClock<0.25 then return end
+    lastRenderClock=now
     local lead=monCore(0)
     local bag=inventory:scanBag()
     local battleText=string.format("BATTLE | %s  |  %s\nMode: %s   Wins: %d\nTime: %s   Wins/hour: %.1f\nLead: %s\n\n%s\n\nB start/stop   1 Lead   2 Balanced",
@@ -497,7 +500,7 @@ local function start(kind)
     chooseLead(); healParty(); prepareBestMove()
     if kind=="Pickup" then pickupStatus="Pickup started. Press P to stop."
     else battleStatus="Battle started. Press B to stop." end
-    render()
+    render(true)
 end
 local function stop(kind,message)
     if activeKind~=kind then return false end
@@ -505,7 +508,7 @@ local function stop(kind,message)
     activeKind=nil; inputMask=0; emu:setKeys(0); if emu.clearKeys then emu:clearKeys(0x3FF) end
     if kind=="Pickup" then pickupStatus=message or "Stopped."
     else battleStatus=message or "Stopped." end
-    render()
+    render(true)
     return true
 end
 local function spinInPlace()

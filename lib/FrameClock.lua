@@ -15,9 +15,10 @@ local clock={
 local FALLBACK_AFTER=0.050
 local FALLBACK_INTERVAL=1/120
 
+local hasCurrentFrame=emu and type(emu.currentFrame)=="function"
 local function currentFrame()
-    local ok,value=pcall(function() return emu:currentFrame() end)
-    return ok and tonumber(value) or nil
+    if not hasCurrentFrame then return nil end
+    return tonumber(emu:currentFrame())
 end
 
 local function updateDisplayFrame(observed,singleStep)
